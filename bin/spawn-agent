@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# Universal Ephemeral Worktree Creator & Semantic Model Tier Dispatcher (`bin/spawn-agent`)
+# Usage:
+#   spawn-agent --tier light|heavy --role architect --repo <path> --task <slug> --brief "<markdown>" [--verify-cmd "<cmd>"] [--cmd "<shell_cmd>"] [--auto-merge]
+set -euo pipefail
+
+SECONDBRAIN_HOME="${SECONDBRAIN_HOME:-$HOME/.secondbrain}"
+SECONDBRAIN_VAULT="${SECONDBRAIN_VAULT:-$HOME/.secondbrain-vault}"
+PYTHON_BIN="$SECONDBRAIN_HOME/.venv/bin/python"
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  PYTHON_BIN="$(command -v python3)"
+fi
+
+TIER="light"
+ROLE="architect"
+REPO_PATH=""
+TASK_SLUG=""
+BRIEF=""
+VERIFY_CMD=""
+EXEC_CMD=""
+AUTO_MERGE="false"
+PARENT_THREAD="${BB_THREAD_ID:-}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --tier) TIER="$2"; shift 2 ;;
+    --role) ROLE="$2"; shift 2 ;;
+    --repo) REPO_PATH="$2"; shift 2 ;;
+    --task) TASK_SLUG="$2"; shift 2 ;;
+    --brief) BRIEF="$2"; shift 2 ;;
+    --verify-cmd) VERIFY_CMD="$2"; shift 2 ;;
+    --cmd) EXEC_CMD="$2"; shift 2 ;;
+    --auto-merge) AUTO_MERGE="true"; shift 1 ;;
+    --parent) PARENT_THREAD="$2"; shift 2 ;;
+    *) echo "Unknown arg: $1" >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$REPO_PATH" || -z "$TASK_SLUG" ]]; then
+  echo "Usage: spawn-agent --repo <path> --task <slug> [--tier light|heavy] [--role architect] [--brief '...'] [--cmd '...'] [--auto-merge]" >&2
+  exit 1
+fi
+
+REPO_PATH="$(cd "$REPO_PATH" && pwd)"
+PROJECT_NAME="$(basename "$REPO_PATH")"
+BASE_BRANCH="$(git -C "$REPO_PATH" rev-parse --abbrev-ref HEAD)"
+BRANCH_NAME="task/$TASK_SLUG"
+WORKTREE_DIR="$REPO_PATH/.worktrees/$TASK_SLUG"
+
+# Ensure .worktrees/ is ignored locally in this repo's .git/info/exclude so it never dirties git status
+EXCLUDE_FILE="$REPO_PATH/.git/info/exclude"
+if [[ -f "$EXCLUDE_FILE" ]] && ! grep -q "^\.worktrees/" "$EXCLUDE_FILE" 2>/dev/null; then
+  echo ".worktrees/" >> "$EXCLUDE_FILE"
+fi
+
+# 1. Create isolated ephemeral worktree (<100ms, 0 MB git object duplication)
+mkdir -p "$REPO_PATH/.worktrees"
+if [[ -d "$WORKTREE_DIR" ]]; then
+  git -C "$REPO_PATH" worktree remove --force "$WORKTREE_DIR" >/dev/null 2>&1 || rm -rf "$WORKTREE_DIR"
+fi
+git -C "$REPO_PATH" worktree prune >/dev/null 2>&1 || true
+
+if git -C "$REPO_PATH" show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+  git -C "$REPO_PATH" worktree add --force "$WORKTREE_DIR" "$BRANCH_NAME" >/dev/null 2>&1
+else
+  git -C "$REPO_PATH" worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR" "$BASE_BRANCH" >/dev/null 2>&1
+fi
+
+# 2. Zero-Bloat Dependency Symlinking (node_modules, .venv)
+for dep_dir in node_modules .venv; do
+  if [[ -d "$REPO_PATH/$dep_dir" && ! -e "$WORKTREE_DIR/$dep_dir" ]]; then
+    ln -s "$REPO_PATH/$dep_dir" "$WORKTREE_DIR/$dep_dir"
+  fi
+done
+
+# 3. Resolve Semantic Model Tier from Vault override or Engine default
+MODEL_CONFIG="$SECONDBRAIN_VAULT/config/models.yaml"
+if [[ ! -f "$MODEL_CONFIG" ]]; then
+  MODEL_CONFIG="$SECONDBRAIN_HOME/config/models.default.yaml"
+fi
+
+DETECTED_HARNESS="cli"
+if [[ -n "${BB_ENVIRONMENT_ID:-}" ]]; then
+  DETECTED_HARNESS="bb"
+elif command -v claude >/dev/null 2>&1 && [[ -n "${CLAUDE_CODE:-}" ]]; then
+  DETECTED_HARNESS="claude"
+elif command -v codex >/dev/null 2>&1 && [[ -n "${CODEX_ENV:-}" ]]; then
+  DETECTED_HARNESS="codex"
+fi
+
+RESOLVED_MODEL="$("$PYTHON_BIN" -c '
+import sys, yaml
+cfg_path, tier, harness = sys.argv[1], sys.argv[2], sys.argv[3]
+data = yaml.safe_load(open(cfg_path)) or {}
+overrides = (data.get("harness_overrides") or {}).get(harness) or {}
+val = overrides.get(tier) or (data.get("default_tiers") or {}).get(tier, "gemini-3.8-flash")
+if isinstance(val, dict):
+    print(val.get("model", "gemini-3.8-flash"))
+else:
+    print(val)
+' "$MODEL_CONFIG" "$TIER" "$DETECTED_HARNESS")"
+
+# Write the plain Markdown task brief into the worktree (untracked)
+BRIEF_FILE="$WORKTREE_DIR/.task-brief.md"
+cat > "$BRIEF_FILE" <<EOF
+# Task: $TASK_SLUG
+- **Repo / Base:** \`$REPO_PATH\` (\`$BASE_BRANCH\`)
+- **Worktree:** \`$WORKTREE_DIR\` (\`$BRANCH_NAME\`)
+- **Model Tier:** \`$TIER\` (\`$RESOLVED_MODEL\`)
+- **Verify-Cmd:** \`${VERIFY_CMD:-true}\`
+
+## Mission & Acceptance Criteria
+$BRIEF
+EOF
+
+# 4. Build the autonomous background worker runner script with pre-exit rebase, auto-merge, and immediate worktree teardown
+RUNNER_SCRIPT="$REPO_PATH/.git/worktrees/$TASK_SLUG/run_worker.sh"
+if [[ ! -d "$(dirname "$RUNNER_SCRIPT")" ]]; then
+  RUNNER_SCRIPT="/tmp/sb_worker_${PROJECT_NAME}_${TASK_SLUG}.sh"
+fi
+
+cat > "$RUNNER_SCRIPT" <<'WORKER_EOF'
+#!/usr/bin/env bash
+set -uo pipefail
+
+REPO_PATH="$1"
+WORKTREE_DIR="$2"
+BRANCH_NAME="$3"
+BASE_BRANCH="$4"
+TASK_SLUG="$5"
+PROJECT_NAME="$6"
+VERIFY_CMD="$7"
+EXEC_CMD="$8"
+AUTO_MERGE="$9"
+SECONDBRAIN_HOME="${10}"
+
+cd "$WORKTREE_DIR"
+
+EXIT_CODE=0
+if [[ -n "$EXEC_CMD" ]]; then
+  eval "$EXEC_CMD" >/dev/null 2>&1 || EXIT_CODE=$?
+fi
+
+if [[ $EXIT_CODE -eq 0 && -n "$VERIFY_CMD" ]]; then
+  eval "$VERIFY_CMD" >/dev/null 2>&1 || EXIT_CODE=$?
+fi
+
+rm -f "$WORKTREE_DIR/.task-brief.md"
+
+# Commit any staged/modified changes if tests passed
+if [[ $EXIT_CODE -eq 0 ]]; then
+  if [[ -n "$(git status --porcelain)" ]]; then
+    git add -A
+    git commit -m "task($TASK_SLUG): automated worktree execution" >/dev/null 2>&1 || true
+  fi
+
+  # Pre-exit rebase onto base branch
+  git rebase "$BASE_BRANCH" >/dev/null 2>&1 || {
+    git rebase --abort >/dev/null 2>&1 || true
+    EXIT_CODE=2
+  }
+fi
+
+COMMIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo 'none')"
+
+if [[ $EXIT_CODE -eq 0 && "$AUTO_MERGE" == "true" ]]; then
+  cd "$REPO_PATH"
+  # Remove symlinked deps before worktree removal
+  for dep_dir in node_modules .venv; do
+    [[ -L "$WORKTREE_DIR/$dep_dir" ]] && rm -f "$WORKTREE_DIR/$dep_dir"
+  done
+  git merge --ff-only "$BRANCH_NAME" >/dev/null 2>&1 || EXIT_CODE=3
+  if [[ $EXIT_CODE -eq 0 ]]; then
+    git worktree remove --force "$WORKTREE_DIR" >/dev/null 2>&1 || rm -rf "$WORKTREE_DIR"
+    git branch -d "$BRANCH_NAME" >/dev/null 2>&1 || true
+    "$SECONDBRAIN_HOME/bin/secondbrain" report --task "$TASK_SLUG" --project "$PROJECT_NAME" --status "merged" --summary "Merged $BRANCH_NAME ($COMMIT_SHA) into $BASE_BRANCH and removed worktree" >/dev/null 2>&1 || true
+    exit 0
+  fi
+fi
+
+if [[ $EXIT_CODE -eq 0 ]]; then
+  "$SECONDBRAIN_HOME/bin/secondbrain" report --task "$TASK_SLUG" --project "$PROJECT_NAME" --status "ready_to_merge" --summary "Ready on $BRANCH_NAME ($COMMIT_SHA) in $WORKTREE_DIR" >/dev/null 2>&1 || true
+else
+  "$SECONDBRAIN_HOME/bin/secondbrain" report --task "$TASK_SLUG" --project "$PROJECT_NAME" --status "blocked" --summary "Verification failed (exit $EXIT_CODE) in $WORKTREE_DIR" >/dev/null 2>&1 || true
+fi
+WORKER_EOF
+
+chmod +x "$RUNNER_SCRIPT"
+
+# Launch worker in background immediately (non-blocking)
+nohup "$RUNNER_SCRIPT" \
+  "$REPO_PATH" "$WORKTREE_DIR" "$BRANCH_NAME" "$BASE_BRANCH" "$TASK_SLUG" \
+  "$PROJECT_NAME" "$VERIFY_CMD" "$EXEC_CMD" "$AUTO_MERGE" "$SECONDBRAIN_HOME" \
+  >/dev/null 2>&1 &
+WORKER_PID=$!
+
+# Register worker in `secondbraind` roster
+"$PYTHON_BIN" "$SECONDBRAIN_HOME/mcp-server/server.py" --rpc roster_upsert --params "$(
+  "$PYTHON_BIN" -c '
+import json, sys
+print(json.dumps({
+    "task_id": sys.argv[1],
+    "project": sys.argv[2],
+    "repo_path": sys.argv[3],
+    "worktree_path": sys.argv[4],
+    "branch": sys.argv[5],
+    "role": sys.argv[6],
+    "tier": sys.argv[7],
+    "harness": sys.argv[8],
+    "pid": int(sys.argv[9]),
+    "status": "running",
+    "summary": f"Model: {sys.argv[10]}"
+}))
+' "$TASK_SLUG" "$PROJECT_NAME" "$REPO_PATH" "$WORKTREE_DIR" "$BRANCH_NAME" "$ROLE" "$TIER" "$DETECTED_HARNESS" "$WORKER_PID" "$RESOLVED_MODEL"
+)" >/dev/null
+
+echo "{\"task_id\": \"$TASK_SLUG\", \"pid\": $WORKER_PID, \"worktree\": \"$WORKTREE_DIR\", \"branch\": \"$BRANCH_NAME\", \"tier\": \"$TIER\", \"model\": \"$RESOLVED_MODEL\"}"

@@ -1,0 +1,271 @@
+vars: {
+  d2-config: {
+    sketch: true
+  }
+}
+
+title: "Personal AI Agent Operating System & Second Brain (Autonomous Lean Architecture)" {
+  near: top-center
+  shape: text
+  style.font-size: 26
+  style.bold: true
+}
+
+# -----------------------------------------------------------------
+# 1. ACTORS & ORCHESTRATION HIERARCHY
+# -----------------------------------------------------------------
+
+captain: Captain (Human User) {
+  shape: person
+  style.fill: "#fef08a"
+  style.stroke: "#ca8a04"
+}
+
+orchestration: Agent Orchestration Hierarchy {
+  style.fill: "#f8fafc"
+  style.stroke: "#94a3b8"
+
+  chief: Global Chief of Staff {
+    shape: rectangle
+    style.fill: "#e0f2fe"
+    style.stroke: "#0284c7"
+    label: "Global Chief of Staff (NEVER BLOCKS)\nLives in ~/.secondbrain (tier: heavy)\n• Quick 1-2 file fix -> Fast-Fix Worker\n• Multi-task initiative -> Project Chief"
+  }
+
+  fast_worker: Fast-Fix Worker {
+    shape: page
+    style.fill: "#e0f2fe"
+    style.stroke: "#0284c7"
+    label: "Fast-Fix Worker (tier: light)\n• Ephemeral worktree + symlinked deps\n• Runs test, FF-merges, deletes worktree"
+  }
+
+  projects: Projects (Isolated Repositories) {
+    style.fill: "#f1f5f9"
+
+    proj_a: Project Repo A {
+      lead_a: Project Chief A {
+        shape: rectangle
+        style.fill: "#f0fdf4"
+        style.stroke: "#16a34a"
+        label: "Project Chief A (tier: heavy)\nLives in Repo A main checkout\nPlans, merges branches & removes worktrees"
+      }
+      arch_a: Task Architect A1 {
+        shape: page
+        style.fill: "#ffffff"
+        label: "Task Architect (tier: light/heavy)\n1 Ephemeral Worktree (.worktrees/<slug>)\nRebases, tests, commits & auto-cleans"
+      }
+      repo_agents_a: Scope 1 Local Memory {
+        shape: document
+        style.fill: "#dcfce7"
+        label: "<repo-a>/AGENTS.md\n(Single-repo quirks & scripts)"
+      }
+      lead_a -> arch_a: "Spawns via bin/spawn-agent"
+      arch_a -> lead_a: "Push-on-exit (BB wakeup / daemon.sock)" {
+        style.stroke-dash: 3
+      }
+    }
+
+    proj_b: Project Repo B {
+      lead_b: Project Chief B {
+        shape: rectangle
+        style.fill: "#f0fdf4"
+        style.stroke: "#16a34a"
+        label: "Project Chief B (tier: heavy)\nLives in Repo B main checkout\nPlans, merges branches & removes worktrees"
+      }
+      arch_b: Task Architect B1 {
+        shape: page
+        style.fill: "#ffffff"
+        label: "Task Architect (tier: light/heavy)\n1 Ephemeral Worktree (.worktrees/<slug>)\nRebases, tests, commits & auto-cleans"
+      }
+      lead_b -> arch_b: "Spawns via bin/spawn-agent"
+      arch_b -> lead_b: "Push-on-exit (BB wakeup / daemon.sock)" {
+        style.stroke-dash: 3
+      }
+    }
+  }
+
+  chief -> fast_worker: "Quick Fix (bin/spawn-agent)"
+  fast_worker -> chief: "Push-on-exit digest" {
+    style.stroke-dash: 3
+  }
+  chief -> projects.proj_a.lead_a: "Project Scope"
+  chief -> projects.proj_b.lead_b: "Project Scope"
+}
+
+captain -> orchestration.chief: "Goals, Tradeoffs, Reviews (Chief Always Available)" {
+  style.stroke: "#0284c7"
+  style.bold: true
+}
+
+# -----------------------------------------------------------------
+# 2. LOCAL MEMORY DAEMON & SELF-HEALING EDITORIAL GATE
+# -----------------------------------------------------------------
+
+memory_system: Shared Second Brain Daemon (secondbraind) {
+  style.fill: "#fffbeb"
+  style.stroke: "#d97706"
+
+  mcp_clients: MCP Client Wrapper {
+    shape: rectangle
+    style.fill: "#ffedd5"
+    style.stroke: "#ea580c"
+    label: "bin/secondbrain-mcp (<10MB)\nLazy-starts daemon via flock\n(BB, Claude Code, Codex, Pi, Antigravity)"
+  }
+
+  daemon: Local Daemon (secondbraind) {
+    shape: hexagon
+    style.fill: "#fef3c7"
+    style.stroke: "#b45309"
+    label: "secondbraind (~/.secondbrain/daemon.sock)\nSingle 67MB ONNX in RAM + SQLite WAL\nExposes: memory_search, memory_record, roster_status"
+  }
+
+  editorial_gate: Agent Editorial Gate {
+    shape: diamond
+    style.fill: "#dcfce7"
+    style.stroke: "#15803d"
+    label: "Self-Healing Editorial Gate\n• Update existing canonical note\n• Create new topic slug\n• Delete obsolete note"
+  }
+
+  safety_linter: Deterministic Safety Linter {
+    shape: diamond
+    style.fill: "#fee2e2"
+    style.stroke: "#dc2626"
+    label: "Safety Linter (<1ms)\nBlocks SSL drops & leaked secrets"
+  }
+
+  janitor: Two-Stage Janitor {
+    shape: oval
+    style.fill: "#fef08a"
+    style.stroke: "#a16207"
+    label: "Janitor Compactor\n1. Python vector clustering (>0.85)\n2. Light agent merges duplicates"
+  }
+
+  mcp_clients -> daemon: "RPC over UNIX Socket"
+  daemon -> editorial_gate: "action=check (>0.80 matches)"
+  editorial_gate -> safety_linter: "update_existing / create_new"
+  janitor -> daemon: "Clusters & merges overlapping notes"
+}
+
+orchestration.chief -> memory_system.mcp_clients: "roster_status() (<5ms recovery)" {
+  style.stroke-dash: 3
+}
+orchestration.projects.proj_a.lead_a -> memory_system.mcp_clients: "Pre-planning memory_search" {
+  style.stroke-dash: 3
+}
+orchestration.projects.proj_a.arch_a -> memory_system.mcp_clients: "Post-test memory_record" {
+  style.stroke-dash: 3
+}
+
+# -----------------------------------------------------------------
+# 3. SINGLE-SPOT ADAPTERS & SUPERVISOR LAYER
+# -----------------------------------------------------------------
+
+tool_adapters: Single-Spot Adapters (bin/) {
+  style.fill: "#f5f3ff"
+  style.stroke: "#7c3aed"
+
+  spawn_adapter: `bin/spawn-agent` {
+    shape: rectangle
+    style.fill: "#ede9fe"
+    style.stroke: "#6d28d9"
+    label: "bin/spawn-agent + config/models.yaml\n• Resolves tier (heavy vs light) per harness\n• Creates ephemeral worktree + symlinks deps\n• Spawns BB Thread or CLI worker"
+  }
+
+  render_adapter: `bin/render-diagram` {
+    shape: rectangle
+    style.fill: "#ede9fe"
+    style.stroke: "#6d28d9"
+    label: "bin/render-diagram (d2 --sketch)\nSingle-spot diagram compiler adapter"
+  }
+
+  supervisor: `bin/secondbrain` CLI Supervisor {
+    shape: package
+    style.fill: "#ddd6fe"
+    style.stroke: "#5b21b6"
+    label: "bin/secondbrain\n• `ps` (active worktrees/workers)\n• `prune` (ancestor-safe crash cleanup)"
+  }
+}
+
+orchestration.projects.proj_a.lead_a -> tool_adapters.spawn_adapter: "Dispatches worker" {
+  style.stroke-dash: 3
+}
+orchestration.projects.proj_a.arch_a -> tool_adapters.render_adapter: "Renders diagrams" {
+  style.stroke-dash: 3
+}
+
+# -----------------------------------------------------------------
+# 4. STORAGE SCOPES (2-Repo Split: Public Engine + Private Vault + Local Cache)
+# -----------------------------------------------------------------
+
+storage_tier: Storage & Persistence Architecture (2-Repo Split) {
+  style.fill: "#fafafa"
+  style.stroke: "#cbd5e1"
+
+  public_engine: Repo 1 — Public Engine (github.com/you/secondbrain) {
+    shape: package
+    style.fill: "#eff6ff"
+    style.stroke: "#3b82f6"
+
+    invariants: Global Instructions & Invariants (Read-Only: chmod a-w) {
+      shape: document
+      label: "AGENTS.md, CLAUDE.md, invariants/*.md\n(Locked read-only; no auto-push)"
+    }
+
+    skills: Core OS Skills & Adapters (Read-Only: chmod a-w) {
+      shape: document
+      label: "skills/*/SKILL.md, bin/*, mcp-server/*\n(Protected by Vault-Aware pre-push privacy hook)"
+    }
+  }
+
+  private_vault: Repo 2 — Private Vault (github.com/you/secondbrain-vault) {
+    shape: package
+    style.fill: "#f0fdf4"
+    style.stroke: "#16a34a"
+
+    charters: Private Charters & Custom Skills {
+      shape: document
+      label: "projects/<slug>.md & skills/*/SKILL.md\n(Your private repos, test cmds & custom skills)"
+    }
+
+    canonical_learnings: Private Knowledge Base {
+      shape: document
+      label: "learnings/<category>/<topic-slug>.md\n(Full Markdown: Trigger / Root Cause / Invariant)"
+    }
+  }
+
+  local_machine: Scope 3 — Local Workstation Storage {
+    style.fill: "#fdf4ff"
+    style.stroke: "#c084fc"
+
+    sqlite_db: Distilled Index-Card Vector DB & Roster {
+      shape: cylinder
+      style.fill: "#fae8ff"
+      style.stroke: "#a855f7"
+      label: "storage/memory.db (Git-Ignored)\n• Embeds ~200-token Index Cards (title+tags+summary)\n• Returns full Markdown file on match\n• Tracks active worker roster"
+    }
+
+    worktrees: Ephemeral Task Worktrees {
+      shape: package
+      style.fill: "#fae8ff"
+      style.stroke: "#a855f7"
+      label: "<repo>/.worktrees/<task-slug>\n• Symlinked/CoW node_modules & .venv (0 bloat)\n• Auto-removed immediately on merge"
+    }
+  }
+}
+
+# -----------------------------------------------------------------
+# WIRING STORAGE CONNECTIONS
+# -----------------------------------------------------------------
+
+memory_system.daemon <-> storage_tier.local_machine.sqlite_db: "Index-Card Vector Search & Roster"
+memory_system.safety_linter -> storage_tier.private_vault.canonical_learnings: "Writes Markdown & async git push to Vault"
+memory_system.janitor -> storage_tier.private_vault.canonical_learnings: "Merges duplicates & git rm obsolete"
+memory_system.daemon -> storage_tier.public_engine.invariants: "Reads system invariants"
+memory_system.daemon -> storage_tier.private_vault.charters: "Reads private project charters"
+
+storage_tier.private_vault.canonical_learnings -> storage_tier.local_machine.sqlite_db: "indexer.py embeds Index Cards (<512 tokens)" {
+  style.stroke-dash: 4
+}
+
+tool_adapters.spawn_adapter -> storage_tier.local_machine.worktrees: "Creates & tears down worktree"
+tool_adapters.supervisor -> storage_tier.local_machine.worktrees: "Ancestor-checked crash prune"

@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# Second Brain CLI Supervisor & Utility Belt (`bin/secondbrain`)
+# Commands:
+#   secondbrain status | ps
+#   secondbrain prune
+#   secondbrain report --task <id> --status <status> --summary "..." [--project <proj>] [--parent <bb_thread_id>]
+#   secondbrain search "<query>"
+#   secondbrain compact
+#   secondbrain invariants
+#   secondbrain privacy-check
+#   secondbrain upgrade
+#   secondbrain publish [commit_message]
+set -euo pipefail
+
+SECONDBRAIN_HOME="${SECONDBRAIN_HOME:-$HOME/.secondbrain}"
+SECONDBRAIN_VAULT="${SECONDBRAIN_VAULT:-$HOME/.secondbrain-vault}"
+PYTHON_BIN="$SECONDBRAIN_HOME/.venv/bin/python"
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  PYTHON_BIN="$(command -v python3)"
+fi
+
+CMD="${1:-status}"
+shift || true
+
+case "$CMD" in
+  status|ps)
+    PROJECT="${1:-}"
+    "$PYTHON_BIN" "$SECONDBRAIN_HOME/mcp-server/server.py" --rpc roster_status --params "$(
+      "$PYTHON_BIN" -c 'import json, sys; print(json.dumps({"project": sys.argv[1] or None}))' "$PROJECT"
+    )"
+    ;;
+
+  search)
+    QUERY="${1:-}"
+    if [[ -z "$QUERY" ]]; then
+      echo "Usage: secondbrain search \"<query>\"" >&2
+      exit 1
+    fi
+    "$PYTHON_BIN" "$SECONDBRAIN_HOME/mcp-server/server.py" --rpc memory_search --params "$(
+      "$PYTHON_BIN" -c 'import json, sys; print(json.dumps({"query": sys.argv[1], "top_k": 3}))' "$QUERY"
+    )"
+    ;;
+
+  compact)
+    "$PYTHON_BIN" "$SECONDBRAIN_HOME/mcp-server/server.py" --rpc memory_compact --params '{"threshold": 0.85}'
+    ;;
+
+  invariants)
+    DOMAIN="${1:-general}"
+    "$PYTHON_BIN" "$SECONDBRAIN_HOME/mcp-server/server.py" --rpc get_invariants --params "$(
+      "$PYTHON_BIN" -c 'import json, sys; print(json.dumps({"domain": sys.argv[1]}))' "$DOMAIN"
+    )"
+    ;;
+
+  report)
+    TASK_ID=""
+    PROJECT="default"
+    STATUS="ok"
+    SUMMARY=""
+    PARENT_ID="${BB_PARENT_THREAD_ID:-}"
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --task) TASK_ID="$2"; shift 2 ;;
+        --project) PROJECT="$2"; shift 2 ;;
+        --status) STATUS="$2"; shift 2 ;;
+        --summary) SUMMARY="$2"; shift 2 ;;
+        --parent) PARENT_ID="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    "$PYTHON_BIN" "$SECONDBRAIN_HOME/mcp-server/server.py" --rpc roster_report --params "$(
+      "$PYTHON_BIN" -c '
+import json, sys
+print(json.dumps({
+    "task_id": sys.argv[1],
+    "project": sys.argv[2],
+    "status": sys.argv[3],
+    "summary": sys.argv[4],
+}))
+' "$TASK_ID" "$PROJECT" "$STATUS" "$SUMMARY"
+    )" >/dev/null
+
+    # If inside BB with a parent thread ID, wake the parent thread natively
+    if [[ -n "$PARENT_ID" ]] && command -v bb >/dev/null 2>&1; then
+      bb thread tell "$PARENT_ID" "[$STATUS] Task $TASK_ID ($PROJECT): $SUMMARY" >/dev/null 2>&1 || true
+    fi
+    echo "{\"reported\": true, \"task_id\": \"$TASK_ID\", \"status\": \"$STATUS\"}"
+    ;;
+
+  prune)
+    # Ancestor-safe dead worktree cleanup across all registered projects in Private Vault
+    "$PYTHON_BIN" - "$SECONDBRAIN_HOME" "$SECONDBRAIN_VAULT" <<'PYEOF'
+import json, os, subprocess, sys, yaml
+from pathlib import Path
+
+engine_dir = Path(sys.argv[1])
+vault_dir = Path(sys.argv[2])
+projects_dir = vault_dir / "projects"
+
+pruned = []
+preserved_unmerged = []
+
+if projects_dir.exists():
+    for md in sorted(projects_dir.glob("*.md")):
+        raw = md.read_text(encoding="utf-8")
+        fm = {}
+        if raw.startswith("---\n"):
+            parts = raw.split("\n---\n", 1)
+            if len(parts) == 2:
+                fm = yaml.safe_load(parts[0][4:]) or {}
+        repo_path = Path(os.path.expanduser(str(fm.get("repo_path", ""))))
+        base_branch = str(fm.get("default_branch", "main"))
+        wt_root = repo_path / ".worktrees"
+        if not wt_root.exists():
+            continue
+        for wt_dir in sorted(wt_root.iterdir()):
+            if not wt_dir.is_dir():
+                continue
+            # Check if worktree HEAD is an ancestor of base_branch and has no dirty files
+            dirty = subprocess.run(["git", "-C", str(wt_dir), "status", "--porcelain"], capture_output=True, text=True)
+            is_anc = subprocess.run(
+                ["git", "-C", str(repo_path), "merge-base", "--is-ancestor", "HEAD", base_branch],
+                cwd=str(wt_dir),
+                capture_output=True,
+            )
+            if dirty.returncode == 0 and not dirty.stdout.strip() and is_anc.returncode == 0:
+                for dep in ("node_modules", ".venv"):
+                    dep_p = wt_dir / dep
+                    if dep_p.is_symlink():
+                        dep_p.unlink()
+                subprocess.run(["git", "-C", str(repo_path), "worktree", "remove", "--force", str(wt_dir)], capture_output=True)
+                subprocess.run(["git", "-C", str(repo_path), "branch", "-d", f"task/{wt_dir.name}"], capture_output=True)
+                pruned.append(str(wt_dir))
+            else:
+                preserved_unmerged.append(str(wt_dir))
+
+print(json.dumps({"pruned_worktrees": pruned, "preserved_unmerged_worktrees": preserved_unmerged}, indent=2))
+PYEOF
+    ;;
+
+  privacy-check)
+    # Vault-Aware Privacy Scanner: ensures zero personal paths, secret tokens, or Private Vault project names leak into Public Engine
+    "$PYTHON_BIN" - "$SECONDBRAIN_HOME" "$SECONDBRAIN_VAULT" <<'PYEOF'
+import os, re, subprocess, sys, yaml
+from pathlib import Path
+
+engine_dir = Path(sys.argv[1]).resolve()
+vault_dir = Path(sys.argv[2]).resolve()
+username = os.environ.get("USER") or Path.home().name
+
+forbidden_Terms = {f"/Users/{username}"}
+# Collect private project slugs/names from Private Vault (excluding generic 'secondbrain' or 'example-project')
+projects_dir = vault_dir / "projects"
+if projects_dir.exists():
+    for md in projects_dir.glob("*.md"):
+        if md.stem not in ("secondbrain", "example-project", "example"):
+            forbidden_Terms.add(md.stem)
+
+secret_regex = re.compile(r"(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\b)")
+
+tracked = subprocess.run(
+    ["git", "-C", str(engine_dir), "ls-files"],
+    capture_output=True,
+    text=True,
+    check=True,
+).stdout.splitlines()
+
+violations = []
+for rel in tracked:
+    fp = engine_dir / rel
+    if not fp.is_file():
+        continue
+    try:
+        text = fp.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        continue
+    for term in forbidden_Terms:
+        if term and term in text:
+            violations.append(f"{rel}: contains private identifier '{term}'")
+    if secret_regex.search(text):
+        violations.append(f"{rel}: matches secret token pattern")
+
+if violations:
+    print("PRIVACY CHECK FAILED — Blocked from Public Engine:", file=sys.stderr)
+    for v in violations:
+        print(f"  - {v}", file=sys.stderr)
+    sys.exit(1)
+
+print("Privacy check passed: 0 personal paths, 0 private vault project names, 0 secrets found in Public Engine.")
+PYEOF
+    ;;
+
+  upgrade)
+    echo "==> Unlocking Public Engine for upgrade..."
+    chmod -R u+w "$SECONDBRAIN_HOME" 2>/dev/null || true
+    if git -C "$SECONDBRAIN_HOME" remote get-url origin >/dev/null 2>&1; then
+      echo "==> Pulling latest Public Engine ($SECONDBRAIN_HOME)..."
+      git -C "$SECONDBRAIN_HOME" pull --ff-only origin main
+    fi
+    if [[ -d "$SECONDBRAIN_VAULT/.git" ]] && git -C "$SECONDBRAIN_VAULT" remote get-url origin >/dev/null 2>&1; then
+      echo "==> Syncing Private Vault ($SECONDBRAIN_VAULT)..."
+      git -C "$SECONDBRAIN_VAULT" pull --rebase --autostash origin main
+    fi
+    echo "==> Running setup.sh to refresh symlinks, index & read-only locks..."
+    "$SECONDBRAIN_HOME/setup.sh"
+    pkill -f "mcp-server/daemon.py" 2>/dev/null || true
+    echo "==> Upgrade complete."
+    ;;
+
+  publish)
+    MSG="${1:-chore: update secondbrain engine}"
+    chmod -R u+w "$SECONDBRAIN_HOME" 2>/dev/null || true
+    trap 'chmod -R a-w "$SECONDBRAIN_HOME/skills" "$SECONDBRAIN_HOME/invariants" "$SECONDBRAIN_HOME/mcp-server" "$SECONDBRAIN_HOME/bin" 2>/dev/null || true' EXIT
+    "$SECONDBRAIN_HOME/bin/secondbrain" privacy-check
+    git -C "$SECONDBRAIN_HOME" add -A
+    if ! git -C "$SECONDBRAIN_HOME" diff --cached --quiet; then
+      git -C "$SECONDBRAIN_HOME" commit -m "$MSG"
+    fi
+    git -C "$SECONDBRAIN_HOME" push origin main
+    echo "==> Published cleanly to Public Engine remote and re-locked read-only permissions."
+    ;;
+
+  *)
+    echo "Usage: secondbrain {status|ps|prune|report|search|compact|invariants|privacy-check|upgrade|publish}" >&2
+    exit 1
+    ;;
+esac

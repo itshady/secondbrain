@@ -1,0 +1,36 @@
+# ~/.secondbrain/config/models.default.yaml
+# Single Source of Truth for Semantic Model Routing Across Harnesses
+# Override personally in ~/.secondbrain-vault/config/models.yaml
+
+default_tiers:
+  # The Brain: Global Chief, Project Chief, Complex Concurrency/Security Architects
+  heavy: "gemini-4-argon"
+
+  # The Workhorse: Fast-Fix Workers, Routine Task Architects, Janitor Compactor
+  light: "gemini-3.8-flash"
+
+  # Vectorizer: 100% Local ONNX Embeddings via fastembed (67MB, 0 API keys, offline)
+  embedding: "BAAI/bge-small-en-v1.5"
+
+harness_overrides:
+  bb:
+    heavy:
+      provider: "acp-antigravity"
+      model: "gemini-4-argon"
+      reasoning: "high"
+    light:
+      provider: "acp-antigravity"
+      model: "gemini-3.8-flash"
+      reasoning: "medium"
+  claude:
+    heavy: "claude-opus-4-6"
+    light: "claude-sonnet-4-6"
+  codex:
+    heavy: "gpt-5.6-sol"
+    light: "gpt-5.6-luna"
+  pi:
+    heavy: "claude-opus-4-6"
+    light: "claude-sonnet-4-6"
+  antigravity:
+    heavy: "gemini-4-argon"
+    light: "gemini-3.8-flash"

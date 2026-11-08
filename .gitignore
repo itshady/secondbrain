@@ -1,0 +1,14 @@
+# Local runtime state & caches (never committed to Public Engine)
+.venv/
+.cache/
+__pycache__/
+*.pyc
+vault
+daemon.sock
+daemon.lock
+daemon.pid
+daemon.log
+storage/*.db
+storage/*.db-wal
+storage/*.db-shm
+.DS_Store

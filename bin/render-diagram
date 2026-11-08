@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Universal Diagram Render Adapter
+# Usage: render-diagram <source-file> [output-svg]
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: render-diagram <source.d2> [output.svg]" >&2
+  exit 1
+fi
+
+SOURCE="$1"
+TARGET="${2:-${SOURCE%.*}.svg}"
+
+# --- ACTIVE BACKEND: D2 (Sketch Mode) ---
+d2 --sketch "$SOURCE" "$TARGET"
