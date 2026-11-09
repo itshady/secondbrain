@@ -164,7 +164,12 @@ for p in projects:
   fi
 
   PROMPT_FILE="$REPO_PATH/.git/bb-prompt-$TASK_SLUG.md"
+  REPORT_PARENT_FLAG=""
+  if [[ -n "$PARENT_THREAD" ]]; then
+    REPORT_PARENT_FLAG=" --parent \"$PARENT_THREAD\""
+  fi
   if [[ "$ROLE" == "project-chief" ]]; then
+    PARENT_NOTIF_MODE="stuck"
     cat > "$PROMPT_FILE" <<PROMPT_EOF
 Use the bb skill "project-chief".
 
@@ -173,13 +178,14 @@ Read your task brief at \`$BRIEF_FILE\` (or below) and execute the initiative by
 
 When complete, report via:
 \`\`\`bash
-$SECONDBRAIN_HOME/bin/secondbrain report --task "$TASK_SLUG" --project "$PROJECT_NAME" --status "ok" --summary "<concise completion summary>"
+$SECONDBRAIN_HOME/bin/secondbrain report --task "$TASK_SLUG" --project "$PROJECT_NAME" --status "ok" --summary "<concise completion summary>"$REPORT_PARENT_FLAG
 \`\`\`
 
 ---
 $(cat "$BRIEF_FILE")
 PROMPT_EOF
   else
+    PARENT_NOTIF_MODE="auto"
     AUTO_MERGE_INSTR="Leave the verified branch \`$BRANCH_NAME\` ready in \`$WORKTREE_DIR\` and report status \`ready_to_merge\`."
     if [[ "$AUTO_MERGE" == "true" ]]; then
       AUTO_MERGE_INSTR="Since \`--auto-merge\` is enabled, after \`${VERIFY_CMD:-true}\` passes and you commit & rebase onto \`$BASE_BRANCH\`, unlink symlinked \`node_modules\`/\`.venv\`, \`cd \"$REPO_PATH\"\`, run \`git merge --ff-only \"$BRANCH_NAME\"\`, remove the worktree (\`git worktree remove --force \"$WORKTREE_DIR\" && git branch -d \"$BRANCH_NAME\"\`), and report status \`merged\`."
@@ -212,6 +218,7 @@ PROMPT_EOF
     --model "$RESOLVED_MODEL"
     --reasoning-level "$RESOLVED_REASONING"
     --permission-mode full
+    --parent-notifications "$PARENT_NOTIF_MODE"
     --title "[$ROLE] $TASK_SLUG"
     --prompt-file "$PROMPT_FILE"
     --json
