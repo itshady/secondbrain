@@ -48,6 +48,7 @@ After completing a task (and **only after verification tests pass**), or wheneve
 ## 3. Public Engine vs. Private Vault vs. Repo Boundary
 
 * **`~/.secondbrain/` (Public Engine):** Locked read-only (`chmod -R a-w`). Contains only universal OS roles and infrastructure. **Never** write personal notes, project names, or project/personal skills into `~/.secondbrain/`.
+  * **Automated 2-Stage Public Release Judge (`secondbrain publish`):** When upgrading `~/.secondbrain`, agents **should** push verified changes to `origin/main` autonomously without waiting for the Captain—provided they read `.bb/skills/publish-judge/SKILL.md`, audit `git diff origin/main..HEAD` against the 5-point Public Release Rubric, record the SHA-bound judge stamp (`secondbrain judge-approve --note "..."`), and run `secondbrain publish` (enforced by `.git/hooks/pre-push`).
 * **`~/.secondbrain-vault/` (Private Vault):** All cross-project learnings (`learnings/`), project charters (`projects/`), and cross-project personal skills (`skills/`) live inside `~/.secondbrain-vault/`. Never place single-repo skills here.
 * **`<repo>/.bb/skills/` & `<repo>/AGENTS.md` (Project Workspace):** All single-repo instructions and project-specific skills live strictly inside the target repository.
 

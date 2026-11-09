@@ -8,6 +8,7 @@
 #   secondbrain compact
 #   secondbrain invariants
 #   secondbrain privacy-check
+#   secondbrain judge-approve [--note "..."]
 #   secondbrain upgrade
 #   secondbrain publish [commit_message]
 set -euo pipefail
@@ -187,6 +188,27 @@ for rel in tracked:
     if secret_regex.search(scannable_text):
         violations.append(f"{rel}: matches secret token pattern")
 
+# Also scan unpushed commit messages and diffs in origin/main..HEAD if origin/main exists
+has_origin = subprocess.run(
+    ["git", "-C", str(engine_dir), "rev-parse", "--verify", "origin/main"],
+    capture_output=True,
+).returncode == 0
+if has_origin:
+    unpushed_log = subprocess.run(
+        ["git", "-C", str(engine_dir), "log", "origin/main..HEAD", "-p"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    scannable_log = data_uri_regex.sub("", unpushed_log)
+    for term in forbidden_paths:
+        if term and term in scannable_log:
+            violations.append(f"git log (origin/main..HEAD): contains private path '{term}'")
+    for slug in forbidden_project_slugs:
+        if slug and re.search(rf"(?<![A-Za-z0-9]){re.escape(slug)}(?![A-Za-z0-9])", scannable_log, re.IGNORECASE):
+            violations.append(f"git log (origin/main..HEAD): contains private project identifier '{slug}'")
+    if secret_regex.search(scannable_log):
+        violations.append("git log (origin/main..HEAD): matches secret token pattern")
+
 if violations:
     print("PRIVACY CHECK FAILED — Blocked from Public Engine:", file=sys.stderr)
     for v in violations:
@@ -194,6 +216,71 @@ if violations:
     sys.exit(1)
 
 print("Privacy check passed: 0 personal paths, 0 private vault project names, 0 secrets found in Public Engine.")
+PYEOF
+    ;;
+
+  judge-approve)
+    NOTE=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --note) NOTE="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    if [[ -z "$NOTE" || "${#NOTE}" -lt 20 ]]; then
+      echo "JUDGE APPROVAL REJECTED: You must read .bb/skills/publish-judge/SKILL.md, audit 'git diff origin/main..HEAD', and pass a descriptive --note (>=20 chars) attesting to the 5-point rubric." >&2
+      exit 1
+    fi
+    "$SECONDBRAIN_HOME/bin/secondbrain" privacy-check
+    HEAD_SHA="$(git -C "$SECONDBRAIN_HOME" rev-parse HEAD)"
+    STAMP_FILE="$SECONDBRAIN_HOME/.git/publish_judge_stamp.json"
+    "$PYTHON_BIN" - "$STAMP_FILE" "$HEAD_SHA" "$NOTE" <<'PYEOF'
+import json, sys, time
+from pathlib import Path
+stamp_path, head_sha, note = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+stamp_path.write_text(json.dumps({
+    "head_sha": head_sha,
+    "verdict": "PASS",
+    "note": note,
+    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+}, indent=2) + "\n", encoding="utf-8")
+print(f"Stage 2 Public Release Judge stamp recorded for HEAD {head_sha[:7]}.")
+PYEOF
+    ;;
+
+  judge-verify)
+    "$SECONDBRAIN_HOME/bin/secondbrain" privacy-check
+    # If there are no unpushed commits compared to origin/main, pass immediately
+    if git -C "$SECONDBRAIN_HOME" rev-parse --verify origin/main >/dev/null 2>&1; then
+      UNPUSHED="$(git -C "$SECONDBRAIN_HOME" rev-list origin/main..HEAD --count 2>/dev/null || echo 0)"
+      if [[ "$UNPUSHED" -eq 0 ]]; then
+        exit 0
+      fi
+    fi
+    HEAD_SHA="$(git -C "$SECONDBRAIN_HOME" rev-parse HEAD)"
+    STAMP_FILE="$SECONDBRAIN_HOME/.git/publish_judge_stamp.json"
+    "$PYTHON_BIN" - "$STAMP_FILE" "$HEAD_SHA" <<'PYEOF'
+import json, sys
+from pathlib import Path
+stamp_path, head_sha = Path(sys.argv[1]), sys.argv[2]
+if not stamp_path.exists():
+    print(
+        f"STAGE 2 JUDGE GATE BLOCKED PUSH: No judge stamp found for HEAD {head_sha[:7]}.\n"
+        "  -> Read .bb/skills/publish-judge/SKILL.md, inspect 'git -C ~/.secondbrain diff origin/main..HEAD',\n"
+        "  -> Then run: secondbrain judge-approve --note \"<5-point rubric audit summary>\"",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+data = json.loads(stamp_path.read_text(encoding="utf-8"))
+if data.get("head_sha") != head_sha or data.get("verdict") != "PASS":
+    print(
+        f"STAGE 2 JUDGE GATE BLOCKED PUSH: Stamp SHA ({str(data.get('head_sha'))[:7]}) does not match current HEAD ({head_sha[:7]}).\n"
+        "  -> Re-audit 'git -C ~/.secondbrain diff origin/main..HEAD' per .bb/skills/publish-judge/SKILL.md,\n"
+        "  -> Then run: secondbrain judge-approve --note \"<5-point rubric audit summary>\"",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+print(f"Stage 2 Public Release Judge verified for HEAD {head_sha[:7]}: {data.get('note')}")
 PYEOF
     ;;
 
@@ -215,20 +302,21 @@ PYEOF
     ;;
 
   publish)
-    MSG="${1:-chore: update secondbrain engine}"
+    MSG="${1:-}"
     chmod -R u+w "$SECONDBRAIN_HOME" 2>/dev/null || true
     trap 'chmod -R a-w "$SECONDBRAIN_HOME/skills" "$SECONDBRAIN_HOME/invariants" "$SECONDBRAIN_HOME/mcp-server" "$SECONDBRAIN_HOME/bin" 2>/dev/null || true' EXIT
     "$SECONDBRAIN_HOME/bin/secondbrain" privacy-check
     git -C "$SECONDBRAIN_HOME" add -A
     if ! git -C "$SECONDBRAIN_HOME" diff --cached --quiet; then
-      git -C "$SECONDBRAIN_HOME" commit -m "$MSG"
+      git -C "$SECONDBRAIN_HOME" commit -m "${MSG:-chore: update secondbrain engine}"
     fi
+    "$SECONDBRAIN_HOME/bin/secondbrain" judge-verify
     git -C "$SECONDBRAIN_HOME" push origin main
     echo "==> Published cleanly to Public Engine remote and re-locked read-only permissions."
     ;;
 
   *)
-    echo "Usage: secondbrain {status|ps|prune|report|search|compact|invariants|privacy-check|upgrade|publish}" >&2
+    echo "Usage: secondbrain {status|ps|prune|report|search|compact|invariants|privacy-check|judge-approve|judge-verify|upgrade|publish}" >&2
     exit 1
     ;;
 esac

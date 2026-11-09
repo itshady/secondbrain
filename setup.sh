@@ -160,16 +160,18 @@ if command -v bb >/dev/null 2>&1; then
   bb plugin enable bb--mcp >/dev/null 2>&1 || true
 fi
 
-echo "==> [6/6] Installing Vault-Aware Privacy Git Hooks & locking Public Engine read-only..."
+echo "==> [6/6] Installing Vault-Aware Privacy & Judge Git Hooks & locking Public Engine read-only..."
 if [[ -d "$ENGINE_DIR/.git" ]]; then
   mkdir -p "$ENGINE_DIR/.git/hooks"
-  for hook_name in pre-commit pre-push; do
-    cat > "$ENGINE_DIR/.git/hooks/$hook_name" <<HOOKEOF
+  cat > "$ENGINE_DIR/.git/hooks/pre-commit" <<HOOKEOF
 #!/usr/bin/env bash
 exec "$ENGINE_DIR/bin/secondbrain" privacy-check
 HOOKEOF
-    chmod +x "$ENGINE_DIR/.git/hooks/$hook_name"
-  done
+  cat > "$ENGINE_DIR/.git/hooks/pre-push" <<HOOKEOF
+#!/usr/bin/env bash
+exec "$ENGINE_DIR/bin/secondbrain" judge-verify
+HOOKEOF
+  chmod +x "$ENGINE_DIR/.git/hooks/pre-commit" "$ENGINE_DIR/.git/hooks/pre-push"
 fi
 
 chmod -R a-w "$ENGINE_DIR/skills" "$ENGINE_DIR/invariants" "$ENGINE_DIR/mcp-server" "$ENGINE_DIR/bin"
