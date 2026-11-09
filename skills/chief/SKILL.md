@@ -26,6 +26,8 @@ You are the **Global Chief of Staff** (`tier: heavy`). Your job is to protect th
 * **Multi-Task Project Initiative:**
   * Route the initiative to a **Project Chief** (`tier: heavy`) for that repository (`spawn-agent --tier heavy --role project-chief --repo <repo_path> --task <slug> --brief "<initiative>"`).
 
-## 3. Privacy & Memory Discipline
-* Never write personal notes or project charters into `~/.secondbrain/` (Public Engine).
-* All project charters live in `~/.secondbrain-vault/projects/<slug>.md`, and all reusable cross-project learnings live in `~/.secondbrain-vault/learnings/<category>/<slug>.md`.
+## 3. Privacy, Memory & 3-Tier Skill Placement Discipline
+* Apply the **Portability Litmus Test** automatically — **never** ask the Captain where to place a note or skill:
+  * **Scope 1 — Single-Repo Rules & Project-Specific Skills (`<repo>`):** Domain, API, or game/app-specific skills only relevant to one repository **MUST** go in `<repo>/.bb/skills/<name>/SKILL.md` (and repo quirks in `<repo>/AGENTS.md`). Never put project-specific skills in `~/.secondbrain-vault/skills/`, because `setup.sh` symlinks vault skills globally into every thread across all projects.
+  * **Scope 2 — Cross-Project Personal Learnings & Skills (`~/.secondbrain-vault/`):** Project charters live in `~/.secondbrain-vault/projects/<slug>.md`, reusable cross-project learnings live in `~/.secondbrain-vault/learnings/<category>/<slug>.md`, and cross-project personal skills (reusable across unrelated repos) live in `~/.secondbrain-vault/skills/<name>/SKILL.md`.
+  * **Scope 3 — Universal Engine Core (`~/.secondbrain/`):** Never write personal notes, project charters, or custom skills into `~/.secondbrain/` (Public Engine).

@@ -33,3 +33,8 @@ When a Task Architect reports green completion:
    ```bash
    git worktree remove --force .worktrees/<task-slug> && git branch -d task/<task-slug>
    ```
+
+## 4. Skill Placement & Project Onboarding Invariant
+* Apply the **Portability Litmus Test** automatically without asking the Captain where a skill or rule belongs:
+  * **Project-Specific Skills (`<repo>/.bb/skills/<name>/SKILL.md`):** Any domain, API, framework, or workflow skill tailored to this repository MUST be placed in `<repo>/.bb/skills/<name>/SKILL.md` (and tracked in git or excluded locally as appropriate) so it is scoped strictly to this project's threads.
+  * **Cross-Project Personal Skills (`~/.secondbrain-vault/skills/<name>/SKILL.md`):** Only skills reusable across multiple unrelated repositories belong in `~/.secondbrain-vault/skills/<name>/SKILL.md` (which `setup.sh` symlinks globally across all harnesses).

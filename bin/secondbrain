@@ -148,15 +148,17 @@ engine_dir = Path(sys.argv[1]).resolve()
 vault_dir = Path(sys.argv[2]).resolve()
 username = os.environ.get("USER") or Path.home().name
 
-forbidden_Terms = {f"/Users/{username}"}
+forbidden_paths = {f"/Users/{username}"}
+forbidden_project_slugs = set()
 # Collect private project slugs/names from Private Vault (excluding generic 'secondbrain' or 'example-project')
 projects_dir = vault_dir / "projects"
 if projects_dir.exists():
     for md in projects_dir.glob("*.md"):
         if md.stem not in ("secondbrain", "example-project", "example"):
-            forbidden_Terms.add(md.stem)
+            forbidden_project_slugs.add(md.stem)
 
 secret_regex = re.compile(r"(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})\b)")
+data_uri_regex = re.compile(r"data:[^;]+;base64,[A-Za-z0-9+/=]+")
 
 tracked = subprocess.run(
     ["git", "-C", str(engine_dir), "ls-files"],
@@ -174,10 +176,15 @@ for rel in tracked:
         text = fp.read_text(encoding="utf-8", errors="ignore")
     except Exception:
         continue
-    for term in forbidden_Terms:
-        if term and term in text:
-            violations.append(f"{rel}: contains private identifier '{term}'")
-    if secret_regex.search(text):
+    # Strip embedded base64 font/image blobs before scanning for project identifiers
+    scannable_text = data_uri_regex.sub("", text)
+    for term in forbidden_paths:
+        if term and term in scannable_text:
+            violations.append(f"{rel}: contains private path '{term}'")
+    for slug in forbidden_project_slugs:
+        if slug and re.search(rf"(?<![A-Za-z0-9]){re.escape(slug)}(?![A-Za-z0-9])", scannable_text, re.IGNORECASE):
+            violations.append(f"{rel}: contains private project identifier '{slug}'")
+    if secret_regex.search(scannable_text):
         violations.append(f"{rel}: matches secret token pattern")
 
 if violations:
