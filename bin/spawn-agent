@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Universal Ephemeral Worktree Creator & Semantic Model Tier Dispatcher (`bin/spawn-agent`)
 # Usage:
-#   spawn-agent --tier light|heavy --role architect --repo <path> --task <slug> --brief "<markdown>" [--verify-cmd "<cmd>"] [--cmd "<shell_cmd>"] [--auto-merge]
+#   spawn-agent --tier light|heavy --role architect|project-chief --repo <path> --task <slug> --brief "<markdown>" [--verify-cmd "<cmd>"] [--cmd "<shell_cmd>"] [--auto-merge]
 set -euo pipefail
 
 SECONDBRAIN_HOME="${SECONDBRAIN_HOME:-$HOME/.secondbrain}"
@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$REPO_PATH" || -z "$TASK_SLUG" ]]; then
-  echo "Usage: spawn-agent --repo <path> --task <slug> [--tier light|heavy] [--role architect] [--brief '...'] [--cmd '...'] [--auto-merge]" >&2
+  echo "Usage: spawn-agent --repo <path> --task <slug> [--tier light|heavy] [--role architect|project-chief] [--brief '...'] [--cmd '...'] [--auto-merge]" >&2
   exit 1
 fi
 
@@ -53,25 +53,44 @@ if [[ -f "$EXCLUDE_FILE" ]] && ! grep -q "^\.worktrees/" "$EXCLUDE_FILE" 2>/dev/
   echo ".worktrees/" >> "$EXCLUDE_FILE"
 fi
 
-# 1. Create isolated ephemeral worktree (<100ms, 0 MB git object duplication)
-mkdir -p "$REPO_PATH/.worktrees"
-if [[ -d "$WORKTREE_DIR" ]]; then
-  git -C "$REPO_PATH" worktree remove --force "$WORKTREE_DIR" >/dev/null 2>&1 || rm -rf "$WORKTREE_DIR"
-fi
-git -C "$REPO_PATH" worktree prune >/dev/null 2>&1 || true
-
-if git -C "$REPO_PATH" show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
-  git -C "$REPO_PATH" worktree add --force "$WORKTREE_DIR" "$BRANCH_NAME" >/dev/null 2>&1
-else
-  git -C "$REPO_PATH" worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR" "$BASE_BRANCH" >/dev/null 2>&1
-fi
-
-# 2. Zero-Bloat Dependency Symlinking (node_modules, .venv)
-for dep_dir in node_modules .venv; do
-  if [[ -d "$REPO_PATH/$dep_dir" && ! -e "$WORKTREE_DIR/$dep_dir" ]]; then
-    ln -s "$REPO_PATH/$dep_dir" "$WORKTREE_DIR/$dep_dir"
+# Install BB native worktree setup/teardown hooks if missing and untracked
+for hook_pair in "bb-env-setup.sh:.bb-env-setup.sh" "bb-env-teardown.sh:.bb-env-teardown.sh"; do
+  tpl_name="${hook_pair%%:*}"
+  dst_name="${hook_pair##*:}"
+  if [[ -f "$SECONDBRAIN_HOME/templates/$tpl_name" && ! -f "$REPO_PATH/$dst_name" ]]; then
+    cp "$SECONDBRAIN_HOME/templates/$tpl_name" "$REPO_PATH/$dst_name"
+    chmod +x "$REPO_PATH/$dst_name"
+    if [[ -f "$EXCLUDE_FILE" ]] && ! grep -q "^${dst_name}$" "$EXCLUDE_FILE" 2>/dev/null; then
+      echo "$dst_name" >> "$EXCLUDE_FILE"
+    fi
   fi
 done
+
+if [[ "$ROLE" == "project-chief" && -z "$EXEC_CMD" ]]; then
+  # Project Chief operates on the main repository checkout
+  WORKTREE_DIR="$REPO_PATH"
+  BRANCH_NAME="$BASE_BRANCH"
+else
+  # 1. Create isolated ephemeral worktree (<100ms, 0 MB git object duplication)
+  mkdir -p "$REPO_PATH/.worktrees"
+  if [[ -d "$WORKTREE_DIR" ]]; then
+    git -C "$REPO_PATH" worktree remove --force "$WORKTREE_DIR" >/dev/null 2>&1 || rm -rf "$WORKTREE_DIR"
+  fi
+  git -C "$REPO_PATH" worktree prune >/dev/null 2>&1 || true
+
+  if git -C "$REPO_PATH" show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+    git -C "$REPO_PATH" worktree add --force "$WORKTREE_DIR" "$BRANCH_NAME" >/dev/null 2>&1
+  else
+    git -C "$REPO_PATH" worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR" "$BASE_BRANCH" >/dev/null 2>&1
+  fi
+
+  # 2. Zero-Bloat Dependency Symlinking (node_modules, .venv)
+  for dep_dir in node_modules .venv; do
+    if [[ -d "$REPO_PATH/$dep_dir" && ! -e "$WORKTREE_DIR/$dep_dir" ]]; then
+      ln -s "$REPO_PATH/$dep_dir" "$WORKTREE_DIR/$dep_dir"
+    fi
+  done
+fi
 
 # 3. Resolve Semantic Model Tier from Vault override or Engine default
 MODEL_CONFIG="$SECONDBRAIN_VAULT/config/models.yaml"
@@ -80,7 +99,7 @@ if [[ ! -f "$MODEL_CONFIG" ]]; then
 fi
 
 DETECTED_HARNESS="cli"
-if [[ -n "${BB_ENVIRONMENT_ID:-}" ]]; then
+if [[ -n "${BB_ENVIRONMENT_ID:-}" || -n "${BB_THREAD_ID:-}" ]] || { [[ -z "$EXEC_CMD" ]] && command -v bb >/dev/null 2>&1; }; then
   DETECTED_HARNESS="bb"
 elif command -v claude >/dev/null 2>&1 && [[ -n "${CLAUDE_CODE:-}" ]]; then
   DETECTED_HARNESS="claude"
@@ -88,32 +107,160 @@ elif command -v codex >/dev/null 2>&1 && [[ -n "${CODEX_ENV:-}" ]]; then
   DETECTED_HARNESS="codex"
 fi
 
-RESOLVED_MODEL="$("$PYTHON_BIN" -c '
+read -r RESOLVED_PROVIDER RESOLVED_MODEL RESOLVED_REASONING < <("$PYTHON_BIN" -c '
 import sys, yaml
 cfg_path, tier, harness = sys.argv[1], sys.argv[2], sys.argv[3]
 data = yaml.safe_load(open(cfg_path)) or {}
 overrides = (data.get("harness_overrides") or {}).get(harness) or {}
-val = overrides.get(tier) or (data.get("default_tiers") or {}).get(tier, "gemini-3.8-flash")
+default_model = "gemini-4-argon" if tier == "heavy" else "gemini-3.8-flash"
+val = overrides.get(tier) or (data.get("default_tiers") or {}).get(tier, default_model)
 if isinstance(val, dict):
-    print(val.get("model", "gemini-3.8-flash"))
+    provider = val.get("provider", "acp-antigravity")
+    model = val.get("model", default_model)
+    reasoning = val.get("reasoning", "high" if tier == "heavy" else "medium")
 else:
-    print(val)
-' "$MODEL_CONFIG" "$TIER" "$DETECTED_HARNESS")"
+    provider = "acp-antigravity"
+    model = str(val)
+    reasoning = "high" if tier == "heavy" else "medium"
+print(f"{provider} {model} {reasoning}")
+' "$MODEL_CONFIG" "$TIER" "$DETECTED_HARNESS")
 
-# Write the plain Markdown task brief into the worktree (untracked)
+# Write the plain Markdown task brief into the workspace (untracked)
 BRIEF_FILE="$WORKTREE_DIR/.task-brief.md"
+if [[ "$WORKTREE_DIR" == "$REPO_PATH" ]]; then
+  BRIEF_FILE="$REPO_PATH/.git/task-brief-$TASK_SLUG.md"
+fi
 cat > "$BRIEF_FILE" <<EOF
 # Task: $TASK_SLUG
+- **Role:** \`$ROLE\`
 - **Repo / Base:** \`$REPO_PATH\` (\`$BASE_BRANCH\`)
-- **Worktree:** \`$WORKTREE_DIR\` (\`$BRANCH_NAME\`)
-- **Model Tier:** \`$TIER\` (\`$RESOLVED_MODEL\`)
+- **Workspace:** \`$WORKTREE_DIR\` (\`$BRANCH_NAME\`)
+- **Model Tier:** \`$TIER\` (\`$RESOLVED_PROVIDER\` / \`$RESOLVED_MODEL\`)
 - **Verify-Cmd:** \`${VERIFY_CMD:-true}\`
+- **Auto-Merge:** \`$AUTO_MERGE\`
 
 ## Mission & Acceptance Criteria
 $BRIEF
 EOF
 
-# 4. Build the autonomous background worker runner script with pre-exit rebase, auto-merge, and immediate worktree teardown
+# 4A. Native BB Thread Spawning Path (when running in BB / bb CLI available and no explicit --cmd shell command)
+if [[ -z "$EXEC_CMD" ]] && command -v bb >/dev/null 2>&1; then
+  BB_PROJECTS_JSON="$(bb project list --json 2>/dev/null || echo '[]')"
+  BB_PROJECT_ID="$("$PYTHON_BIN" -c '
+import json, os, sys
+projects = json.loads(sys.argv[1])
+target = os.path.realpath(sys.argv[2])
+for p in projects:
+    for s in p.get("sources") or []:
+        sp = s.get("path")
+        if sp and os.path.realpath(sp) == target:
+            print(p["id"])
+            sys.exit(0)
+' "$BB_PROJECTS_JSON" "$REPO_PATH")"
+
+  if [[ -z "$BB_PROJECT_ID" ]]; then
+    CREATE_OUT="$(bb project create --name "$PROJECT_NAME" --root "$REPO_PATH" --json 2>/dev/null || echo '{}')"
+    BB_PROJECT_ID="$("$PYTHON_BIN" -c 'import json, sys; print((json.loads(sys.argv[1]) or {}).get("id", ""))' "$CREATE_OUT")"
+  fi
+
+  PROMPT_FILE="$REPO_PATH/.git/bb-prompt-$TASK_SLUG.md"
+  if [[ "$ROLE" == "project-chief" ]]; then
+    cat > "$PROMPT_FILE" <<PROMPT_EOF
+Use the bb skill "project-chief".
+
+You are the **Project Chief** for \`$PROJECT_NAME\` (\`$REPO_PATH\`, base branch \`$BASE_BRANCH\`).
+Read your task brief at \`$BRIEF_FILE\` (or below) and execute the initiative by breaking it into bounded tasks, searching the Second Brain (\`memory_search\`), spawning Task Architects via \`spawn-agent\`, verifying and merging their branches, and cleaning up worktrees.
+
+When complete, report via:
+\`\`\`bash
+$SECONDBRAIN_HOME/bin/secondbrain report --task "$TASK_SLUG" --project "$PROJECT_NAME" --status "ok" --summary "<concise completion summary>"
+\`\`\`
+
+---
+$(cat "$BRIEF_FILE")
+PROMPT_EOF
+  else
+    AUTO_MERGE_INSTR="Leave the verified branch \`$BRANCH_NAME\` ready in \`$WORKTREE_DIR\` and report status \`ready_to_merge\`."
+    if [[ "$AUTO_MERGE" == "true" ]]; then
+      AUTO_MERGE_INSTR="Since \`--auto-merge\` is enabled, after \`${VERIFY_CMD:-true}\` passes and you commit & rebase onto \`$BASE_BRANCH\`, unlink symlinked \`node_modules\`/\`.venv\`, \`cd \"$REPO_PATH\"\`, run \`git merge --ff-only \"$BRANCH_NAME\"\`, remove the worktree (\`git worktree remove --force \"$WORKTREE_DIR\" && git branch -d \"$BRANCH_NAME\"\`), and report status \`merged\`."
+    fi
+    cat > "$PROMPT_FILE" <<PROMPT_EOF
+Use the bb skill "architect".
+
+You are a **Task Architect** operating inside the isolated ephemeral git worktree \`$WORKTREE_DIR\` on branch \`$BRANCH_NAME\` (base branch: \`$BASE_BRANCH\` in \`$REPO_PATH\`).
+
+1. Read \`.task-brief.md\` in your worktree and \`$REPO_PATH/AGENTS.md\` (if present).
+2. Implement the mission cleanly inside \`$WORKTREE_DIR\`. Remove \`.task-brief.md\` before committing.
+3. Run the verification command: \`${VERIFY_CMD:-true}\` (must exit 0).
+4. Commit your changes with a clean atomic commit message and run \`git rebase $BASE_BRANCH\`.
+5. $AUTO_MERGE_INSTR
+6. Signal completion via:
+\`\`\`bash
+$SECONDBRAIN_HOME/bin/secondbrain report --task "$TASK_SLUG" --project "$PROJECT_NAME" --status "ok" --summary "<1-line summary + commit SHA>"
+\`\`\`
+
+---
+$(cat "$BRIEF_FILE")
+PROMPT_EOF
+  fi
+
+  SPAWN_ARGS=(
+    thread spawn
+    --project "$BB_PROJECT_ID"
+    --environment "$WORKTREE_DIR"
+    --provider "$RESOLVED_PROVIDER"
+    --model "$RESOLVED_MODEL"
+    --reasoning-level "$RESOLVED_REASONING"
+    --permission-mode full
+    --title "[$ROLE] $TASK_SLUG"
+    --prompt-file "$PROMPT_FILE"
+    --json
+  )
+  if [[ -n "${BB_THREAD_ID:-}" && "$PARENT_THREAD" == "${BB_THREAD_ID:-}" ]]; then
+    SPAWN_ARGS+=(--parent-self)
+  elif [[ -n "$PARENT_THREAD" ]]; then
+    SPAWN_ARGS+=(--parent-thread "$PARENT_THREAD")
+  fi
+
+  SPAWN_OUT="$(bb "${SPAWN_ARGS[@]}" 2>/dev/null || true)"
+  rm -f "$PROMPT_FILE"
+
+  SPAWNED_THREAD_ID="$("$PYTHON_BIN" -c '
+import json, sys
+try:
+    d = json.loads(sys.argv[1])
+    print(d.get("threadId") or d.get("id") or (d.get("thread") or {}).get("id") or "")
+except Exception:
+    print("")
+' "$SPAWN_OUT")"
+
+  if [[ -n "$SPAWNED_THREAD_ID" ]]; then
+    "$PYTHON_BIN" "$SECONDBRAIN_HOME/mcp-server/server.py" --rpc roster_upsert --params "$(
+      "$PYTHON_BIN" -c '
+import json, sys
+print(json.dumps({
+    "task_id": sys.argv[1],
+    "project": sys.argv[2],
+    "repo_path": sys.argv[3],
+    "worktree_path": sys.argv[4],
+    "branch": sys.argv[5],
+    "role": sys.argv[6],
+    "tier": sys.argv[7],
+    "harness": "bb",
+    "pid": None,
+    "thread_id": sys.argv[8],
+    "status": "running",
+    "summary": f"BB Thread {sys.argv[8]} ({sys.argv[9]}/{sys.argv[10]})"
+}))
+' "$TASK_SLUG" "$PROJECT_NAME" "$REPO_PATH" "$WORKTREE_DIR" "$BRANCH_NAME" "$ROLE" "$TIER" "$SPAWNED_THREAD_ID" "$RESOLVED_PROVIDER" "$RESOLVED_MODEL"
+    )" >/dev/null
+
+    echo "{\"task_id\": \"$TASK_SLUG\", \"thread_id\": \"$SPAWNED_THREAD_ID\", \"project_id\": \"$BB_PROJECT_ID\", \"worktree\": \"$WORKTREE_DIR\", \"branch\": \"$BRANCH_NAME\", \"tier\": \"$TIER\", \"provider\": \"$RESOLVED_PROVIDER\", \"model\": \"$RESOLVED_MODEL\"}"
+    exit 0
+  fi
+fi
+
+# 4B. Headless CLI / Deterministic Shell Command Runner (`--cmd` or non-BB fallback)
 RUNNER_SCRIPT="$REPO_PATH/.git/worktrees/$TASK_SLUG/run_worker.sh"
 if [[ ! -d "$(dirname "$RUNNER_SCRIPT")" ]]; then
   RUNNER_SCRIPT="/tmp/sb_worker_${PROJECT_NAME}_${TASK_SLUG}.sh"

@@ -100,7 +100,7 @@ for target_skills_dir in "${HARNESS_SKILL_DIRS[@]}"; do
 done
 
 # Symlink global root AGENTS.md / CLAUDE.md instructions where supported
-for instr_target in "$HOME/.codex/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"; do
+for instr_target in "$HOME/.bb/AGENTS.md" "$HOME/.codex/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"; do
   mkdir -p "$(dirname "$instr_target")"
   if [[ ! -f "$instr_target" || -L "$instr_target" ]]; then
     ln -sfn "$ENGINE_DIR/AGENTS.md" "$instr_target"
@@ -113,13 +113,14 @@ fi
 
 echo "==> [5/6] Registering bin/secondbrain-mcp in harness MCP configs..."
 "$VENV_DIR/bin/python" - "$ENGINE_DIR/bin/secondbrain-mcp" <<'PYEOF'
-import json, sys
+import json, re, sys
 from pathlib import Path
 
 mcp_bin = sys.argv[1]
 home = Path.home()
 
 json_configs = [
+    home / ".gemini" / "config" / "mcp_config.json",
     home / ".cursor" / "mcp.json",
     home / ".claude.json",
 ]
@@ -127,8 +128,9 @@ json_configs = [
 for cfg_path in json_configs:
     try:
         if cfg_path.exists():
-            data = json.loads(cfg_path.read_text(encoding="utf-8"))
-        elif cfg_path.name == "mcp.json":
+            raw = cfg_path.read_text(encoding="utf-8").strip()
+            data = json.loads(raw) if raw else {}
+        elif cfg_path.name in ("mcp.json", "mcp_config.json"):
             cfg_path.parent.mkdir(parents=True, exist_ok=True)
             data = {}
         else:
@@ -138,7 +140,25 @@ for cfg_path in json_configs:
         cfg_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except Exception:
         pass
+
+codex_toml = home / ".codex" / "config.toml"
+if codex_toml.exists():
+    try:
+        text = codex_toml.read_text(encoding="utf-8")
+        section = f'[mcp_servers.secondbrain]\nargs = []\ncommand = "{mcp_bin}"\n'
+        pattern = re.compile(r"^\[mcp_servers\.secondbrain\]\n(?:(?!\[).*\n)*", re.MULTILINE)
+        if pattern.search(text):
+            text = pattern.sub(section, text)
+        else:
+            text = text.rstrip() + "\n\n" + section
+        codex_toml.write_text(text, encoding="utf-8")
+    except Exception:
+        pass
 PYEOF
+
+if command -v bb >/dev/null 2>&1; then
+  bb plugin enable bb--mcp >/dev/null 2>&1 || true
+fi
 
 echo "==> [6/6] Installing Vault-Aware Privacy Git Hooks & locking Public Engine read-only..."
 if [[ -d "$ENGINE_DIR/.git" ]]; then
