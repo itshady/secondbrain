@@ -210,6 +210,11 @@ $(cat "$BRIEF_FILE")
 PROMPT_EOF
   fi
 
+  THREAD_TITLE="🔨 $TASK_SLUG"
+  if [[ "$ROLE" == "project-chief" ]]; then
+    THREAD_TITLE="🎯 Chief: $PROJECT_NAME"
+  fi
+
   SPAWN_ARGS=(
     thread spawn
     --project "$BB_PROJECT_ID"
@@ -219,7 +224,7 @@ PROMPT_EOF
     --reasoning-level "$RESOLVED_REASONING"
     --permission-mode full
     --parent-notifications "$PARENT_NOTIF_MODE"
-    --title "[$ROLE] $TASK_SLUG"
+    --title "$THREAD_TITLE"
     --prompt-file "$PROMPT_FILE"
     --json
   )
