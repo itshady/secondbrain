@@ -36,8 +36,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$REPO_PATH" || -z "$TASK_SLUG" ]]; then
-  echo "Usage: spawn-agent --repo <path> --task <slug> [--tier light|heavy] [--role architect|project-chief] [--brief '...'] [--cmd '...'] [--auto-merge]" >&2
+if [[ -z "$TASK_SLUG" ]]; then
+  echo "Usage: spawn-agent --task <slug> [--repo <path>] [--tier light|heavy] [--role architect|project-chief|research-chief] [--brief '...'] [--cmd '...'] [--auto-merge]" >&2
+  exit 1
+fi
+
+if [[ "$ROLE" == "research-chief" && -z "$REPO_PATH" ]]; then
+  # Research Chief uses the Second Brain Engine directory or thread storage for discovery
+  REPO_PATH="$SECONDBRAIN_HOME"
+fi
+
+if [[ -z "$REPO_PATH" ]]; then
+  echo "Usage: spawn-agent --repo <path> --task <slug> [--tier light|heavy] [--role architect|project-chief|research-chief] [--brief '...']" >&2
   exit 1
 fi
 
@@ -68,6 +78,10 @@ done
 
 if [[ "$ROLE" == "project-chief" && -z "$EXEC_CMD" ]]; then
   # Project Chief operates on the main repository checkout
+  WORKTREE_DIR="$REPO_PATH"
+  BRANCH_NAME="$BASE_BRANCH"
+elif [[ "$ROLE" == "research-chief" && -z "$EXEC_CMD" ]]; then
+  # Research Chief operates without an isolated git worktree
   WORKTREE_DIR="$REPO_PATH"
   BRANCH_NAME="$BASE_BRANCH"
 else
@@ -184,6 +198,21 @@ $SECONDBRAIN_HOME/bin/secondbrain report --task "$TASK_SLUG" --project "$PROJECT
 ---
 $(cat "$BRIEF_FILE")
 PROMPT_EOF
+  elif [[ "$ROLE" == "research-chief" ]]; then
+    PARENT_NOTIF_MODE="stuck"
+    cat > "$PROMPT_FILE" <<PROMPT_EOF
+Use the bb skill "research-chief".
+
+You are the **Research Chief** for **$TASK_SLUG**.
+Your mission is to serve as an intellectual sparring partner for the Captain during this pre-project discovery phase.
+
+1. Search and synthesize SOTA papers, open-source libraries, and practical architectures.
+2. Discuss trade-offs, empirical benchmarks, and design options interactively with the Captain.
+3. When converged, draft the project charter in \`$SECONDBRAIN_VAULT/projects/<slug>.md\` and record reusable learnings.
+
+---
+$(cat "$BRIEF_FILE")
+PROMPT_EOF
   else
     PARENT_NOTIF_MODE="auto"
     AUTO_MERGE_INSTR="Leave the verified branch \`$BRANCH_NAME\` ready in \`$WORKTREE_DIR\` and report status \`ready_to_merge\`."
@@ -213,6 +242,8 @@ PROMPT_EOF
   THREAD_TITLE="🔨 $TASK_SLUG"
   if [[ "$ROLE" == "project-chief" ]]; then
     THREAD_TITLE="🎯 Chief: $PROJECT_NAME"
+  elif [[ "$ROLE" == "research-chief" ]]; then
+    THREAD_TITLE="🔬 Research: $TASK_SLUG"
   fi
 
   SPAWN_ARGS=(
