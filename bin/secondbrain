@@ -221,30 +221,147 @@ PYEOF
 
   judge-approve)
     NOTE=""
+    FORCE="false"
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --note) NOTE="$2"; shift 2 ;;
+        --force) FORCE="true"; shift 1 ;;
         *) shift ;;
       esac
     done
-    if [[ -z "$NOTE" || "${#NOTE}" -lt 20 ]]; then
-      echo "JUDGE APPROVAL REJECTED: You must read .bb/skills/publish-judge/SKILL.md, audit 'git diff origin/main..HEAD', and pass a descriptive --note (>=20 chars) attesting to the 5-point rubric." >&2
-      exit 1
-    fi
+
     "$SECONDBRAIN_HOME/bin/secondbrain" privacy-check
+
     HEAD_SHA="$(git -C "$SECONDBRAIN_HOME" rev-parse HEAD)"
     STAMP_FILE="$SECONDBRAIN_HOME/.git/publish_judge_stamp.json"
-    "$PYTHON_BIN" - "$STAMP_FILE" "$HEAD_SHA" "$NOTE" <<'PYEOF'
-import json, sys, time
+
+    # Stage 2: Independent Sub-Agent Audit
+    "$PYTHON_BIN" - "$SECONDBRAIN_HOME" "$HEAD_SHA" "$NOTE" "$FORCE" "$STAMP_FILE" <<'PYEOF'
+import json, os, re, shutil, subprocess, sys, time
 from pathlib import Path
-stamp_path, head_sha, note = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+
+engine_dir = Path(sys.argv[1]).resolve()
+head_sha = sys.argv[2]
+user_note = sys.argv[3]
+force = sys.argv[4] == "true"
+stamp_path = Path(sys.argv[5])
+
+rubric_path = engine_dir / ".bb" / "skills" / "publish-judge" / "SKILL.md"
+rubric_text = rubric_path.read_text(encoding="utf-8") if rubric_path.exists() else "Auditing against 5-point Public Release Rubric: zero personal paths, zero private project names, zero secrets, 100% universal OS scope, clean history."
+
+diff_res = subprocess.run(
+    ["git", "-C", str(engine_dir), "diff", "origin/main..HEAD"],
+    capture_output=True,
+    text=True,
+)
+diff_text = diff_res.stdout
+if not diff_text.strip():
+    diff_text = subprocess.run(
+        ["git", "-C", str(engine_dir), "show", "--stat", head_sha],
+        capture_output=True,
+        text=True,
+    ).stdout
+
+judge_prompt = f"""You are the Second Brain Public Release Privacy Judge.
+Your sole job is to audit this git diff against the 5-point Public Release Rubric before it is pushed to the public repository.
+
+[5-POINT PUBLIC RELEASE RUBRIC]
+{rubric_text}
+
+[GIT DIFF TO AUDIT]
+{diff_text}
+
+Respond ONLY with a single valid JSON object in this exact schema, with no markdown fences, no code blocks, and no extra commentary:
+{{"verdict": "PASS" | "BLOCK", "reason": "<one sentence concise justification>"}}
+"""
+
+judge_res_json = None
+judge_harness = None
+
+# 1. Try agy (lightweight Gemini 3.8 Flash, low effort)
+if shutil.which("agy"):
+    try:
+        proc = subprocess.run(
+            ["agy", "-p", judge_prompt, "--model", "gemini-3.8-flash", "--effort", "low"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            raw = proc.stdout.strip()
+            # Extract JSON substring if wrapped in anything
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            if m:
+                data = json.loads(m.group(0))
+                if data.get("verdict") in ("PASS", "BLOCK"):
+                    judge_res_json = data
+                    judge_harness = "agy (gemini-3.8-flash:low)"
+    except Exception:
+        pass
+
+# 2. Fallback to claude / codex if agy not available
+if not judge_res_json and shutil.which("claude"):
+    try:
+        proc = subprocess.run(
+            ["claude", "-p", judge_prompt, "--model", "claude-haiku-4-5-20251001", "--bare"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            m = re.search(r"\{.*\}", proc.stdout.strip(), re.DOTALL)
+            if m:
+                data = json.loads(m.group(0))
+                if data.get("verdict") in ("PASS", "BLOCK"):
+                    judge_res_json = data
+                    judge_harness = "claude (haiku)"
+    except Exception:
+        pass
+
+if not judge_res_json and shutil.which("codex"):
+    try:
+        proc = subprocess.run(
+            ["codex", "exec", judge_prompt, "--model", "gpt-5.6-luna"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            m = re.search(r"\{.*\}", proc.stdout.strip(), re.DOTALL)
+            if m:
+                data = json.loads(m.group(0))
+                if data.get("verdict") in ("PASS", "BLOCK"):
+                    judge_res_json = data
+                    judge_harness = "codex (luna)"
+    except Exception:
+        pass
+
+if not judge_res_json:
+    if force and user_note and len(user_note) >= 20:
+        judge_res_json = {"verdict": "PASS", "reason": f"Manual override: {user_note}"}
+        judge_harness = "manual_override"
+    else:
+        print("STAGE 2 JUDGE ERROR: Could not execute stateless judge agent (no working agy/claude/codex CLI available).", file=sys.stderr)
+        print("Pass --force with a verified --note (>=20 chars) if you need to approve manually.", file=sys.stderr)
+        sys.exit(1)
+
+verdict = judge_res_json.get("verdict")
+reason = judge_res_json.get("reason", "No reason provided")
+
+if verdict != "PASS":
+    print(f"STAGE 2 JUDGE REJECTED PUSH ({judge_harness}):\n  -> {reason}", file=sys.stderr)
+    sys.exit(1)
+
 stamp_path.write_text(json.dumps({
     "head_sha": head_sha,
     "verdict": "PASS",
-    "note": note,
-    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    "judge_harness": judge_harness,
+    "reason": reason,
+    "user_note": user_note,
+    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
 }, indent=2) + "\n", encoding="utf-8")
-print(f"Stage 2 Public Release Judge stamp recorded for HEAD {head_sha[:7]}.")
+
+print(f"Stage 2 Public Release Judge PASSED via {judge_harness} for HEAD {head_sha[:7]}: {reason}")
 PYEOF
     ;;
 
