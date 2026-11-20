@@ -5,7 +5,7 @@
 set -euo pipefail
 
 WORKTREE_ROOT="$(pwd -P)"
-for dep_dir in node_modules .venv; do
+for dep_dir in node_modules .venv .env; do
   if [[ -L "$WORKTREE_ROOT/$dep_dir" ]]; then
     rm -f "$WORKTREE_ROOT/$dep_dir"
   fi

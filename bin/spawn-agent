@@ -98,12 +98,21 @@ else
     git -C "$REPO_PATH" worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR" "$BASE_BRANCH" >/dev/null 2>&1
   fi
 
-  # 2. Zero-Bloat Dependency Symlinking (node_modules, .venv)
+  # 2. Zero-Bloat Dependency & Secret Symlinking (node_modules, .venv, .env)
   for dep_dir in node_modules .venv; do
     if [[ -d "$REPO_PATH/$dep_dir" && ! -e "$WORKTREE_DIR/$dep_dir" ]]; then
       ln -s "$REPO_PATH/$dep_dir" "$WORKTREE_DIR/$dep_dir"
     fi
   done
+  if [[ -f "$REPO_PATH/.env" && ! -e "$WORKTREE_DIR/.env" ]]; then
+    ln -s "$REPO_PATH/.env" "$WORKTREE_DIR/.env"
+  fi
+fi
+
+# Ensure project secrets are synchronized from ~/.secrets/ hub before execution
+"$SECONDBRAIN_HOME/bin/secondbrain" secrets-sync "$REPO_PATH" >/dev/null 2>&1 || true
+if [[ "$WORKTREE_DIR" != "$REPO_PATH" && -f "$REPO_PATH/.env" && ! -e "$WORKTREE_DIR/.env" ]]; then
+  ln -s "$REPO_PATH/.env" "$WORKTREE_DIR/.env"
 fi
 
 # 3. Resolve Semantic Model Tier from Vault override or Engine default
@@ -217,7 +226,7 @@ PROMPT_EOF
     PARENT_NOTIF_MODE="auto"
     AUTO_MERGE_INSTR="Leave the verified branch \`$BRANCH_NAME\` ready in \`$WORKTREE_DIR\` and report status \`ready_to_merge\`."
     if [[ "$AUTO_MERGE" == "true" ]]; then
-      AUTO_MERGE_INSTR="Since \`--auto-merge\` is enabled, after \`${VERIFY_CMD:-true}\` passes and you commit & rebase onto \`$BASE_BRANCH\`, unlink symlinked \`node_modules\`/\`.venv\`, \`cd \"$REPO_PATH\"\`, run \`git merge --ff-only \"$BRANCH_NAME\"\`, remove the worktree (\`git worktree remove --force \"$WORKTREE_DIR\" && git branch -d \"$BRANCH_NAME\"\`), report status \`merged\`, and finally run \`bb thread archive --self\` so this finished worker thread does not bloat the sidebar."
+      AUTO_MERGE_INSTR="Since \`--auto-merge\` is enabled, after \`${VERIFY_CMD:-true}\` passes and you commit & rebase onto \`$BASE_BRANCH\`, unlink symlinked \`node_modules\`/\`.venv\`/\`.env\`, \`cd \"$REPO_PATH\"\`, run \`git merge --ff-only \"$BRANCH_NAME\"\`, remove the worktree (\`git worktree remove --force \"$WORKTREE_DIR\" && git branch -d \"$BRANCH_NAME\"\`), report status \`merged\`, and finally run \`bb thread archive --self\` so this finished worker thread does not bloat the sidebar."
     fi
     cat > "$PROMPT_FILE" <<PROMPT_EOF
 Use the bb skill "architect".
@@ -359,7 +368,7 @@ COMMIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo 'none')"
 if [[ $EXIT_CODE -eq 0 && "$AUTO_MERGE" == "true" ]]; then
   cd "$REPO_PATH"
   # Remove symlinked deps before worktree removal
-  for dep_dir in node_modules .venv; do
+  for dep_dir in node_modules .venv .env; do
     [[ -L "$WORKTREE_DIR/$dep_dir" ]] && rm -f "$WORKTREE_DIR/$dep_dir"
   done
   git merge --ff-only "$BRANCH_NAME" >/dev/null 2>&1 || EXIT_CODE=3

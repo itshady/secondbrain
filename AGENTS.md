@@ -54,10 +54,19 @@ After completing a task (and **only after verification tests pass**), or wheneve
 
 ---
 
-## 4. Visual Architecture Diagrams & Zero-Exposure Secret Collection
+## 4. Visual Architecture Diagrams, Zero-Exposure Secrets Hub & Symlinking
 
 * **Diagrams:** Whenever creating or updating an architecture diagram, follow `skills/diagramming/SKILL.md` and compile via `render-diagram <source.d2> <output.svg>`. Never hardcode raw compiler flags in documentation.
-* **Native BB Secret Collection (`bb secret request`):** When running inside `bb` and a user credential or API key is required for a `.env` file, **always** invoke the `secrets` skill (`bb secret request <VAR_NAME> --purpose "..." --describe <VAR_NAME> "..." --write-env <path/.env>`) to pop up a secure masked UI form that writes `.env` directly. **Never** instruct the Captain to manually `cp .env.example .env` and paste secrets into a terminal or chat.
+* **The Central `~/.secrets/` Hub:**
+  * All credentials live in `~/.secrets/` (mode `700`, never committed):
+    * `~/.secrets/global.env`: Shared keys (e.g., `GEMINI_API_KEY`, `OPENAI_API_KEY`).
+    * `~/.secrets/<project_slug>.env`: Project-specific keys (e.g., `ALPACA_API_KEY`, `PROVIDER_API_KEY`).
+  * **Native BB Secret Collection (`bb secret request`):** When running inside `bb` and a credential is required, **always** invoke the `secrets` skill with `--write-env`:
+    * Shared keys: `bb secret request <VAR> --purpose "..." --describe <VAR> "..." --write-env ~/.secrets/global.env`
+    * Project-specific keys: `bb secret request <VAR> --purpose "..." --describe <VAR> "..." --write-env ~/.secrets/<slug>.env`
+    * After requesting, run `secondbrain secrets-sync <repo>` to merge keys into `<repo>/.env` (mode `600`).
+  * **Zero-Bloat Worktree Symlinking:** Background worktrees (`.worktrees/<slug>`) automatically symlink `<repo>/.env` alongside `node_modules` and `.venv`, so task workers have immediate credentials without manual copying.
+  * **Strict Invariant:** **Never** instruct the Captain to manually `cp .env.example .env` or paste secrets into a terminal or chat.
 
 ---
 

@@ -8,6 +8,7 @@
 #   secondbrain compact
 #   secondbrain invariants
 #   secondbrain privacy-check
+#   secondbrain secrets-sync [repo_path]
 #   secondbrain judge-approve [--note "..."]
 #   secondbrain upgrade
 #   secondbrain publish [commit_message]
@@ -136,6 +137,113 @@ if projects_dir.exists():
                 preserved_unmerged.append(str(wt_dir))
 
 print(json.dumps({"pruned_worktrees": pruned, "preserved_unmerged_worktrees": preserved_unmerged}, indent=2))
+PYEOF
+    ;;
+
+  secrets-sync)
+    TARGET_REPO="${1:-}"
+    "$PYTHON_BIN" - "$SECONDBRAIN_HOME" "$SECONDBRAIN_VAULT" "$TARGET_REPO" <<'PYEOF'
+import os, sys, yaml
+from pathlib import Path
+
+engine_dir = Path(sys.argv[1]).resolve()
+vault_dir = Path(sys.argv[2]).resolve()
+target_arg = sys.argv[3].strip()
+
+secrets_dir = Path.home() / ".secrets"
+secrets_dir.mkdir(mode=0o700, exist_ok=True)
+global_env = secrets_dir / "global.env"
+if not global_env.exists():
+    global_env.touch(mode=0o600)
+
+def parse_env_lines(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    res = {}
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            k, v = line.split("=", 1)
+            res[k.strip()] = v.strip()
+    return res
+
+def sync_one_repo(repo_path: Path, slug: str):
+    if slug == "secondbrain" or repo_path == engine_dir:
+        # Never write a .env into Public Engine
+        return
+    # Order of precedence: local .env preserves custom keys, overridden by global.env, overridden by <slug>.env
+    merged = {}
+    dest_env = repo_path / ".env"
+    if dest_env.is_file() and not dest_env.is_symlink():
+        merged.update(parse_env_lines(dest_env))
+    merged.update(parse_env_lines(global_env))
+    proj_env = secrets_dir / f"{slug}.env"
+    if proj_env.is_file():
+        merged.update(parse_env_lines(proj_env))
+
+    if merged or proj_env.exists() or global_env.exists():
+        content = "\n".join(f"{k}={v}" for k, v in sorted(merged.items())) + "\n"
+        if not dest_env.is_symlink():
+            dest_env.write_text(content, encoding="utf-8")
+            dest_env.chmod(0o600)
+
+    # Protect .env in git
+    git_dir = repo_path / ".git"
+    if git_dir.is_dir():
+        exclude_file = git_dir / "info" / "exclude"
+        exclude_file.parent.mkdir(parents=True, exist_ok=True)
+        current = exclude_file.read_text(encoding="utf-8") if exclude_file.exists() else ""
+        if not any(line.strip() == ".env" for line in current.splitlines()):
+            with exclude_file.open("a", encoding="utf-8") as f:
+                f.write("\n.env\n")
+
+    print(f"Synced secrets for '{slug}' -> {dest_env} ({len(merged)} variables)")
+
+if target_arg:
+    p = Path(os.path.expanduser(target_arg)).resolve()
+    # Find matching project slug from charters or fallback to folder name
+    slug = p.name.lstrip(".")
+    projects_dir = vault_dir / "projects"
+    if projects_dir.is_dir():
+        for md in projects_dir.glob("*.md"):
+            raw = md.read_text(encoding="utf-8", errors="ignore")
+            if raw.startswith("---\n"):
+                parts = raw.split("\n---\n", 1)
+                if len(parts) == 2:
+                    try:
+                        fm = yaml.safe_load(parts[0][4:]) or {}
+                        rp = Path(os.path.expanduser(str(fm.get("repo_path", "")))).resolve()
+                        if rp == p and fm.get("slug"):
+                            slug = str(fm["slug"])
+                            break
+                    except Exception:
+                        pass
+    sync_one_repo(p, slug)
+else:
+    # Sync all registered projects
+    synced_any = False
+    projects_dir = vault_dir / "projects"
+    if projects_dir.is_dir():
+        for md in sorted(projects_dir.glob("*.md")):
+            raw = md.read_text(encoding="utf-8", errors="ignore")
+            if raw.startswith("---\n"):
+                parts = raw.split("\n---\n", 1)
+                if len(parts) == 2:
+                    try:
+                        fm = yaml.safe_load(parts[0][4:]) or {}
+                        rp_str = fm.get("repo_path")
+                        slug = str(fm.get("slug") or md.stem)
+                        if rp_str:
+                            rp = Path(os.path.expanduser(str(rp_str))).resolve()
+                            if rp.is_dir():
+                                sync_one_repo(rp, slug)
+                                synced_any = True
+                    except Exception:
+                        pass
+    if not synced_any:
+        print("No registered projects found in vault to sync.")
 PYEOF
     ;;
 

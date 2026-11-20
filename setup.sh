@@ -54,6 +54,12 @@ if [[ ! -f "$VAULT_DIR/.gitattributes" ]]; then
 fi
 ln -sfn "$VAULT_DIR" "$ENGINE_DIR/vault"
 
+# Set up ~/.secrets/ Central Hub (0 MB git overhead, chmod 700)
+mkdir -p "$HOME/.secrets"
+chmod 700 "$HOME/.secrets"
+touch "$HOME/.secrets/global.env"
+chmod 600 "$HOME/.secrets/global.env"
+
 echo "==> [2/6] Setting up Python virtual environment & local ONNX dependencies..."
 VENV_DIR="$ENGINE_DIR/.venv"
 if command -v uv >/dev/null 2>&1; then

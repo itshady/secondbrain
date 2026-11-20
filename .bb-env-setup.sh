@@ -10,8 +10,12 @@ COMMON_GIT_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/n
 if [[ -n "$COMMON_GIT_DIR" && "$(basename "$COMMON_GIT_DIR")" == ".git" ]]; then
   MAIN_REPO_ROOT="$(dirname "$COMMON_GIT_DIR")"
   if [[ "$MAIN_REPO_ROOT" != "$WORKTREE_ROOT" ]]; then
-    for dep_dir in node_modules .venv; do
-      if [[ -d "$MAIN_REPO_ROOT/$dep_dir" && ! -e "$WORKTREE_ROOT/$dep_dir" ]]; then
+    # Ensure fresh secrets are synced from ~/.secrets/ hub
+    if [[ -x "$HOME/.secondbrain/bin/secondbrain" ]]; then
+      "$HOME/.secondbrain/bin/secondbrain" secrets-sync "$MAIN_REPO_ROOT" >/dev/null 2>&1 || true
+    fi
+    for dep_dir in node_modules .venv .env; do
+      if [[ -e "$MAIN_REPO_ROOT/$dep_dir" && ! -e "$WORKTREE_ROOT/$dep_dir" ]]; then
         ln -s "$MAIN_REPO_ROOT/$dep_dir" "$WORKTREE_ROOT/$dep_dir"
       fi
     done
