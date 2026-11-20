@@ -217,7 +217,7 @@ PROMPT_EOF
     PARENT_NOTIF_MODE="auto"
     AUTO_MERGE_INSTR="Leave the verified branch \`$BRANCH_NAME\` ready in \`$WORKTREE_DIR\` and report status \`ready_to_merge\`."
     if [[ "$AUTO_MERGE" == "true" ]]; then
-      AUTO_MERGE_INSTR="Since \`--auto-merge\` is enabled, after \`${VERIFY_CMD:-true}\` passes and you commit & rebase onto \`$BASE_BRANCH\`, unlink symlinked \`node_modules\`/\`.venv\`, \`cd \"$REPO_PATH\"\`, run \`git merge --ff-only \"$BRANCH_NAME\"\`, remove the worktree (\`git worktree remove --force \"$WORKTREE_DIR\" && git branch -d \"$BRANCH_NAME\"\`), and report status \`merged\`."
+      AUTO_MERGE_INSTR="Since \`--auto-merge\` is enabled, after \`${VERIFY_CMD:-true}\` passes and you commit & rebase onto \`$BASE_BRANCH\`, unlink symlinked \`node_modules\`/\`.venv\`, \`cd \"$REPO_PATH\"\`, run \`git merge --ff-only \"$BRANCH_NAME\"\`, remove the worktree (\`git worktree remove --force \"$WORKTREE_DIR\" && git branch -d \"$BRANCH_NAME\"\`), report status \`merged\`, and finally run \`bb thread archive --self\` so this finished worker thread does not bloat the sidebar."
     fi
     cat > "$PROMPT_FILE" <<PROMPT_EOF
 Use the bb skill "architect".
@@ -259,6 +259,9 @@ PROMPT_EOF
     --prompt-file "$PROMPT_FILE"
     --json
   )
+  if [[ -n "$PARENT_THREAD" && "$ROLE" != "project-chief" ]]; then
+    SPAWN_ARGS+=(--lifecycle-owner-thread "$PARENT_THREAD")
+  fi
   if [[ -n "${BB_THREAD_ID:-}" && "$PARENT_THREAD" == "${BB_THREAD_ID:-}" ]]; then
     SPAWN_ARGS+=(--parent-self)
   elif [[ -n "$PARENT_THREAD" ]]; then
@@ -364,6 +367,9 @@ if [[ $EXIT_CODE -eq 0 && "$AUTO_MERGE" == "true" ]]; then
     git worktree remove --force "$WORKTREE_DIR" >/dev/null 2>&1 || rm -rf "$WORKTREE_DIR"
     git branch -d "$BRANCH_NAME" >/dev/null 2>&1 || true
     "$SECONDBRAIN_HOME/bin/secondbrain" report --task "$TASK_SLUG" --project "$PROJECT_NAME" --status "merged" --summary "Merged $BRANCH_NAME ($COMMIT_SHA) into $BASE_BRANCH and removed worktree" >/dev/null 2>&1 || true
+    if [[ -n "${BB_THREAD_ID:-}" ]] && command -v bb >/dev/null 2>&1; then
+      bb thread archive --self >/dev/null 2>&1 || true
+    fi
     exit 0
   fi
 fi
