@@ -11,9 +11,9 @@ All agents in the fleet must uphold these non-negotiable guarantees before repor
 
 ---
 
-## 2. Verification First (No Greenwashing)
+## 2. Verification First (No Greenwashing & 99.9% No Test Bloat)
 * **Concrete Terminal Proof:** No task is complete until its verification command (`Verify-Cmd`) has been executed in the terminal with exit code `0`.
-* **Real Integration Tests Over Brittle Mocks:** Test real code paths, real SQLite/filesystem state, and real CLI invocations rather than mocking away the system under test.
+* **Pragmatic Verification Over Test Suites:** 99.9% of the time, do NOT write unit tests, mocks, or synthetic test suites unless explicitly requested or guarding a mission-critical project invariant. Verify code by running the actual command, script, endpoint, or inspect real state.
 * **Pre-Exit Rebase:** Before exiting a worktree, always run `git rebase <base_branch>` and re-verify tests so parallel sibling worktree changes never break the base branch.
 
 ---

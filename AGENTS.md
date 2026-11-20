@@ -58,3 +58,29 @@ After completing a task (and **only after verification tests pass**), or wheneve
 
 * **Diagrams:** Whenever creating or updating an architecture diagram, follow `skills/diagramming/SKILL.md` and compile via `render-diagram <source.d2> <output.svg>`. Never hardcode raw compiler flags in documentation.
 * **Native BB Secret Collection (`bb secret request`):** When running inside `bb` and a user credential or API key is required for a `.env` file, **always** invoke the `secrets` skill (`bb secret request <VAR_NAME> --purpose "..." --describe <VAR_NAME> "..." --write-env <path/.env>`) to pop up a secure masked UI form that writes `.env` directly. **Never** instruct the Captain to manually `cp .env.example .env` and paste secrets into a terminal or chat.
+
+---
+
+## 5. Coding & Implementation Invariants (Simplicity-First)
+
+Behavioral rules to prevent over-engineering, defensive bloat, and context pollution.
+
+### 1. Simplicity Over Cleverness
+* **Minimum code that solves the problem:** No features, configuration, or abstractions beyond what was asked.
+* **No defensive coding:** Do not write error handling, null-checks, or fallbacks for impossible scenarios or niche 0.1% edge cases. Let code be clean and direct.
+* **No single-use abstractions:** If a function or class is only used in one place, inline it. If you wrote 200 lines and it could be 40 lines, rewrite it.
+
+### 2. Surgical, Scope-Bounded Changes
+* **Touch only what you must:** Never reformat, "clean up", or refactor adjacent or unbroken code.
+* **Match existing style:** Follow the existing patterns in the file, even if you would personally write it differently.
+* **Clean up only your own orphans:** Remove imports or variables made unused by your changes. Do not delete pre-existing dead code unless explicitly requested.
+* **Traceability:** Every changed line in the diff must trace directly to the Captain's prompt.
+
+### 3. Think & Align Before Coding
+* **Surface assumptions:** If there are multiple reasonable interpretations, state them briefly and ask—do not choose silently.
+* **Push back on complexity:** If the Captain asks for an approach and you know a much simpler 5-line way to do it, speak up.
+* **Stop on confusion:** If an instruction or codebase boundary is ambiguous, stop and ask rather than guessing and generating messy diffs.
+
+### 4. Pragmatic Verification (99.9% No Test Bloat)
+* **No test ceremony:** Do NOT write unit tests, mocks, or test suites unless explicitly requested or when guarding a mission-critical project invariant.
+* **Real terminal verification over unit tests:** Verify code by running the actual command, script, CLI tool, or inspect the real output state. If it works end-to-end, it's done.
