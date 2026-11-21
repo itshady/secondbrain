@@ -164,6 +164,27 @@ PYEOF
 
 if command -v bb >/dev/null 2>&1; then
   bb plugin enable bb--mcp >/dev/null 2>&1 || true
+
+  installed_plugins="$(bb plugin list 2>/dev/null || true)"
+  for pdir in "$ENGINE_DIR/plugins"/* "$VAULT_DIR/plugins"/*; do
+    [[ -f "$pdir/package.json" ]] || continue
+    plugin_id="$(python3 -c "import json, sys, re; name = json.load(open(sys.argv[1])).get('name', ''); name = re.sub(r'^@[^/]+/', '', name); print(re.sub(r'^bb-plugin-', '', name))" "$pdir/package.json" 2>/dev/null || true)"
+    [[ -n "$plugin_id" ]] || continue
+    if ! echo "$installed_plugins" | grep -E -q "^${plugin_id}(@|[[:space:]])"; then
+      if [[ ! -d "$pdir/node_modules" ]]; then
+        npm --prefix "$pdir" install --no-audit --no-fund || true
+      fi
+      (bb plugin build "$pdir" && bb plugin install --yes "$pdir") || true
+    fi
+  done
+
+  if bb plugin list 2>/dev/null | grep -E -q "^unified-usage(@|[[:space:]])"; then
+    hidden_footer="$(bb settings ui get sidebar.hiddenFooterItems 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$hidden_footer" == "[]" ]]; then
+      bb settings ui set sidebar.hiddenFooterItems '["plugin:bb--provider-usage/usage"]' >/dev/null 2>&1 || true
+      bb settings ui set sidebar.footerOrder '["builtin:mobile","plugin:unified-usage/unified-usage","builtin:report-bug"]' >/dev/null 2>&1 || true
+    fi
+  fi
 fi
 
 echo "==> [6/6] Installing Vault-Aware Privacy & Judge Git Hooks & locking Public Engine read-only..."
