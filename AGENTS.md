@@ -16,7 +16,7 @@ You operate within the **Second Brain & Chief of Staff Operating System** (`~/.s
      ```bash
      spawn-agent --tier light|heavy --role architect --repo <repo_path> --task <slug> --brief "<markdown_brief>"
      ```
-   * **Immediate Teardown:** Workers rebase onto the base branch (`git rebase <base>`), run the verification command, fast-forward merge (`git merge --ff-only` or open a PR if targeting a protected branch), and **immediately delete `.worktrees/<slug>`** so the disk stays 100% clean.
+   * **Immediate Teardown & Auto-Archive:** Workers rebase onto the base branch (`git rebase <base>`), run the verification command, fast-forward merge (`git merge --ff-only` or open a PR if targeting a protected branch), **immediately delete `.worktrees/<slug>`**, and archive the worker thread (`bb thread archive <thread_id>`) so both the disk and the sidebar stay 100% clean.
 
 ---
 

@@ -25,7 +25,7 @@ Before breaking down an initiative:
   *(Use `--tier heavy` only for complex concurrency, security boundaries, or intricate algorithms.)*
 * Inside **BB**, `spawn-agent` uses native BB threads/workflows so the Captain can see live progress in the sidebar. Inside headless CLI harnesses, it spawns background workers tracked by `secondbrain ps`.
 
-## 3. Integration & Immediate Worktree Teardown
+## 3. Integration & Immediate Worktree & Thread Teardown
 When a Task Architect reports green completion:
 1. Inspect `git diff <base_branch>...task/<task-slug>` to confirm scope and test passage.
 2. **Merge:**
@@ -35,6 +35,12 @@ When a Task Architect reports green completion:
    ```bash
    git worktree remove --force .worktrees/<task-slug> && git branch -d task/<task-slug>
    ```
+4. **Archive Worker Thread (Zero Sidebar Bloat):**
+   Immediately archive the finished worker thread so the project sidebar stays 100% clean and lean:
+   ```bash
+   bb thread archive <worker_thread_id>
+   ```
+   *(The thread ID is provided in the parent notification or via `secondbrain status` / `bb threads list`).*
 
 ## 4. Skill Placement & Project Onboarding Invariant
 * Apply the **Portability Litmus Test** automatically without asking the Captain where a skill or rule belongs:
