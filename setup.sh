@@ -182,7 +182,57 @@ if command -v bb >/dev/null 2>&1; then
     hidden_footer="$(bb settings ui get sidebar.hiddenFooterItems 2>/dev/null | tr -d '[:space:]' || true)"
     if [[ "$hidden_footer" == "[]" ]]; then
       bb settings ui set sidebar.hiddenFooterItems '["plugin:bb--provider-usage/usage"]' >/dev/null 2>&1 || true
-      bb settings ui set sidebar.footerOrder '["builtin:mobile","plugin:unified-usage/unified-usage","builtin:report-bug"]' >/dev/null 2>&1 || true
+      bb settings ui set sidebar.footerOrder '["builtin:mobile","plugin:unified-usage/unified-usage","plugin:automations-popover/automations-popover","builtin:report-bug"]' >/dev/null 2>&1 || true
+    fi
+  fi
+
+  vault_proj_id="$( (bb project list --json 2>/dev/null || true) | python3 -c 'import json, sys, os
+try:
+    ps = json.load(sys.stdin)
+except Exception:
+    ps = []
+v = os.path.abspath(sys.argv[1])
+print(next((p["id"] for p in ps if isinstance(p, dict) for s in p.get("sources", []) if os.path.abspath(s.get("path", "")) == v), ""))' "$VAULT_DIR" 2>/dev/null || true)"
+
+  if [[ -z "$vault_proj_id" ]]; then
+    vault_proj_id="$( (bb project create --name "Second Brain Vault" --root "$VAULT_DIR" --json 2>/dev/null || true) | python3 -c 'import json, sys
+try:
+    res = json.load(sys.stdin)
+except Exception:
+    res = {}
+print(res.get("id", "") if isinstance(res, dict) else "")' 2>/dev/null || true)"
+  fi
+
+  if [[ -n "$vault_proj_id" ]]; then
+    has_janitor="$( (bb automation list --project "$vault_proj_id" --json 2>/dev/null || true) | python3 -c 'import json, sys
+try:
+    autos = json.load(sys.stdin)
+except Exception:
+    autos = []
+print("yes" if any(isinstance(a, dict) and a.get("name") == "Weekly Second Brain Janitor" for a in autos) else "")' 2>/dev/null || true)"
+
+    if [[ -z "$has_janitor" ]]; then
+      local_tz="$(readlink /etc/localtime 2>/dev/null | sed -n 's|.*zoneinfo/||p' || true)"
+      [[ -z "$local_tz" ]] && local_tz="UTC"
+
+      janitor_prompt='Use the bb skill "janitor".
+
+Run the weekly Second Brain Vault cleanup:
+1. Run `secondbrain compact` (or call `memory_compact`) to find overlapping learning clusters (>0.85 similarity).
+2. For any overlapping clusters, synthesize them into one crisp canonical note via `memory_record(action="update_existing")` and delete redundant notes via `memory_record(action="delete")`. Also quickly scan `~/.secondbrain-vault/learnings/` for obviously outdated or low-signal notes and prune/refine them.
+3. Run `secondbrain prune` to clean up any crashed/already-merged worktrees.
+4. Report a 1-line summary via `secondbrain report --task "weekly-janitor" --project "secondbrain" --status "ok" --summary "<summary>"`, and finally run `bb thread archive --self` so weekly runs do not bloat the sidebar.'
+
+      bb automation create \
+        --project "$vault_proj_id" \
+        --name "Weekly Second Brain Janitor" \
+        --cron "0 20 * * 0" \
+        --timezone "$local_tz" \
+        --provider acp-antigravity \
+        --model gemini-3.8-flash \
+        --reasoning low \
+        --environment "$VAULT_DIR" \
+        --prompt "$janitor_prompt" >/dev/null 2>&1 || true
     fi
   fi
 fi
