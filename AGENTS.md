@@ -6,8 +6,9 @@ You operate within the **Second Brain & Chief of Staff Operating System** (`~/.s
 
 ## 1. Orchestration & Non-Blocking Execution Rules
 
-1. **Global Chief Never Blocks or Codes in the Main Thread:**
+1. **Global Chief & Project Chiefs Never Block or Code in the Main Thread:**
    * When acting as the primary interactive agent (Global Chief), **never** write application code, run long builds/test suites, or poll in a blocking sleep loop in the main conversation thread.
+   * **Project Chiefs Never Code Inline:** Project Chiefs NEVER write application code or run builds/edits inline—every code change (even small fixes) MUST be delegated to an ephemeral Task Architect via `spawn-agent`.
    * Keep the main chat 100% responsive for the Captain.
    * On session start (or after context compaction), call the `roster_status` MCP tool (or run `secondbrain status`) to recover all registered projects, active worktrees, and unread worker completion digests in `<5ms`.
 2. **Universal Ephemeral Worktrees (`bin/spawn-agent`):**
