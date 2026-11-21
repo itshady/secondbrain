@@ -1,0 +1,23 @@
+{
+  "name": "bb-plugin-agy-skills-sync",
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "bb": ">=0.50",
+    "bbPluginSdk": ">=0.6.157"
+  },
+  "bb": {
+    "name": "AGY Skills Sync",
+    "description": "Automatically syncs BB global skills into Antigravity (~/.gemini/config/skills.json).",
+    "branding": {
+      "icon": "Sparkles"
+    },
+    "server": "./server.ts",
+    "skills": []
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "0.6.157",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
