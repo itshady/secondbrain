@@ -33,6 +33,32 @@ export const normalizedAutomationSchema = z.object({
 export type Trigger = z.infer<typeof triggerSchema>;
 export type NormalizedAutomation = z.infer<typeof normalizedAutomationSchema>;
 
+export function normalizeAutomation(item: any, project: { id: string; name: string }): NormalizedAutomation {
+  const triggerObj = item.trigger ?? {};
+  const execObj = item.execution ?? {};
+
+  const trigger: Trigger = {
+    triggerType: String(triggerObj.triggerType ?? "schedule"),
+    ...(triggerObj.cron ? { cron: String(triggerObj.cron) } : {}),
+    ...(triggerObj.timezone ? { timezone: String(triggerObj.timezone) } : {}),
+    ...(triggerObj.at ? { at: String(triggerObj.at) } : {}),
+  };
+
+  return {
+    id: String(item.id),
+    projectId: project.id,
+    projectName: project.name,
+    name: String(item.name || item.id),
+    enabled: Boolean(item.enabled),
+    trigger,
+    nextRunAt: item.nextRunAt ?? null,
+    lastRunAt: item.lastRunAt ?? null,
+    lastRunStatus: item.lastRunStatus ? String(item.lastRunStatus) : null,
+    ...(execObj.model ? { model: String(execObj.model) } : {}),
+    mode: String(execObj.mode ?? "script"),
+  };
+}
+
 export const rpcContract = defineRpcContract({
   listAutomations: {
     input: z.object({}),
@@ -152,28 +178,7 @@ export default async function plugin(bb: BbPluginApi) {
             const parsed = JSON.parse(stdout);
             if (!Array.isArray(parsed)) return [];
 
-            return parsed.map((item: any): NormalizedAutomation => {
-              const triggerObj = item.trigger ?? {};
-              const execObj = item.execution ?? {};
-              return {
-                id: String(item.id),
-                projectId: project.id,
-                projectName: project.name,
-                name: String(item.name || item.id),
-                enabled: Boolean(item.enabled),
-                trigger: {
-                  triggerType: String(triggerObj.triggerType ?? "schedule"),
-                  cron: triggerObj.cron ? String(triggerObj.cron) : undefined,
-                  timezone: triggerObj.timezone ? String(triggerObj.timezone) : undefined,
-                  at: triggerObj.at ? String(triggerObj.at) : undefined,
-                },
-                nextRunAt: item.nextRunAt ?? null,
-                lastRunAt: item.lastRunAt ?? null,
-                lastRunStatus: item.lastRunStatus ? String(item.lastRunStatus) : null,
-                model: execObj.model ? String(execObj.model) : undefined,
-                mode: String(execObj.mode ?? "script"),
-              };
-            });
+            return parsed.map((item: any): NormalizedAutomation => normalizeAutomation(item, project));
           } catch (err: unknown) {
             bb.log.warn(`failed to list automations for project ${project.id}: ${String(err)}`);
             return [];
