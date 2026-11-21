@@ -32,7 +32,7 @@ For any non-trivial web application, dashboard, or interactive view:
 ---
 
 ## 3. Mandatory Visual Verification & Self-Critique Loop
-Never declare frontend work complete based on unit tests or DOM string assertions alone. UI is an inherently visual discipline and must be verified visually before concluding any task.
+Never declare frontend work complete based on unit tests or DOM string assertions alone. UI is an inherently visual discipline and must be verified visually before concluding any task (consult the `browser-automation` skill for full API details).
 
 1. **Boot Development Server:**
    Start the local dev server (e.g., `npm run dev` or `vite`) in the background or subshell and confirm clean compilation without warnings.
@@ -41,16 +41,16 @@ Never declare frontend work complete based on unit tests or DOM string assertion
    bb browser-automation open --backend local --headless --machine <host-id> --json
    ```
    Inspect console outputs to verify zero runtime exceptions, unhandled Promise rejections, or missing network assets.
-3. **Capture Responsive Viewports:**
-   * **Desktop Viewport (1440px):** Capture primary desktop layout:
+3. **Navigate & Capture Responsive Viewports:**
+   * **Desktop Viewport (1440px):** Navigate and set desktop viewport:
      ```bash
-     bb browser-automation screenshot --session-id <session-id> --output desktop.png
+     bb browser-automation run <session-id> --script 'const p = await browser.getPage("main"); await p.setViewportSize({ width: 1440, height: 900 }); await p.goto("http://localhost:<port>"); await p.shot({ type: "jpeg", maxEdge: 960, quality: 70 }); undefined' --json
      ```
    * **Mobile Viewport (390px):** Resize and capture mobile layout:
      ```bash
-     bb browser-automation resize --session-id <session-id> --width 390 --height 844
-     bb browser-automation screenshot --session-id <session-id> --output mobile.png
+     bb browser-automation run <session-id> --script 'const p = await browser.getPage("main"); await p.setViewportSize({ width: 390, height: 844 }); await p.shot({ type: "jpeg", maxEdge: 960, quality: 70 }); undefined' --json
      ```
+   * Alternatively, capture snapshots via `bb browser-automation screenshot <session-id> --page main --json` and inspect the returned `images[].path` with `read_file`.
 4. **Autonomous Self-Critique as Design Lead:**
    * Inspect the captured image files using your multimodal image-reading tool.
    * Evaluate visual rhythm: check for inconsistent padding, visual hierarchy flattening, low contrast text, misaligned grid baselines, and horizontal scroll leakage on mobile.
@@ -59,5 +59,5 @@ Never declare frontend work complete based on unit tests or DOM string assertion
    * Re-capture screenshots to confirm resolution.
    * Cleanly close the browser session:
      ```bash
-     bb browser-automation close --session-id <session-id>
+     bb browser-automation close <session-id>
      ```
