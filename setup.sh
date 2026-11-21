@@ -165,6 +165,10 @@ PYEOF
 if command -v bb >/dev/null 2>&1; then
   bb plugin enable bb--mcp >/dev/null 2>&1 || true
 
+  if ! bb skill list 2>/dev/null | grep -q "frontend-design"; then
+    bb skill install anthropics/skills/frontend-design >/dev/null 2>&1 || true
+  fi
+
   installed_plugins="$(bb plugin list 2>/dev/null || true)"
   for pdir in "$ENGINE_DIR/plugins"/* "$VAULT_DIR/plugins"/*; do
     [[ -f "$pdir/package.json" ]] || continue

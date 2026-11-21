@@ -24,6 +24,7 @@ Before breaking down an initiative:
   spawn-agent --tier light --role architect --repo <repo_path> --task <task-slug> --brief "<4-line-markdown-brief>"
   ```
   *(Use `--tier heavy` only for complex concurrency, security boundaries, or intricate algorithms.)*
+* **UI/Frontend Tasks:** For new UI/frontend architecture or major redesign tasks, use `--tier heavy` and instruct the Task Architect to load the `frontend-craft` skill (and `frontend-design` when available), including the mandatory browser screenshot self-critique pass.
 * Inside **BB**, `spawn-agent` uses native BB threads/workflows so the Captain can see live progress in the sidebar. Inside headless CLI harnesses, it spawns background workers tracked by `secondbrain ps`.
 
 ## 3. Integration & Immediate Worktree & Thread Teardown
