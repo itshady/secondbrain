@@ -41,7 +41,7 @@ After completing a task (and **only after verification tests pass**), or wheneve
   * **Cross-Project Personal Skills (`~/.secondbrain-vault/skills/<name>/SKILL.md`):**
     * Reusable personal workflow skills that apply across multiple unrelated repositories live in `~/.secondbrain-vault/skills/<name>/SKILL.md` (symlinked globally by `setup.sh`) and are rerun via `setup.sh`.
 * **Scope 3 — Universal Engine Core & Local Workstation Cache (`~/.secondbrain/`):**
-  * **Universal Engine Core Skills (`~/.secondbrain/skills/`):** Only the universal OS roles (`chief`, `project-chief`, `architect`, `janitor`, `diagramming`) live in `~/.secondbrain/skills/`.
+  * **Universal Engine Core Skills (`~/.secondbrain/skills/`):** Only the universal OS roles (`chief`, `project-chief`, `architect`, `reaper`, `janitor`, `diagramming`) live in `~/.secondbrain/skills/`.
   * **Local Vector & Roster Cache (`~/.secondbrain/storage/memory.db`):** Managed automatically by `secondbraind`. Never edit binary SQLite files directly.
 
 ---
@@ -92,5 +92,5 @@ Behavioral rules to prevent over-engineering, defensive bloat, and context pollu
 * **Stop on confusion:** If an instruction or codebase boundary is ambiguous, stop and ask rather than guessing and generating messy diffs.
 
 ### 4. Pragmatic Verification (99.9% No Test Bloat)
-* **No test ceremony:** Do NOT write unit tests, mocks, or test suites unless explicitly requested or when guarding a mission-critical project invariant.
-* **Real terminal verification over unit tests:** Verify code by running the actual command, script, CLI tool, or inspect the real output state. If it works end-to-end, it's done.
+* **No test ceremony:** Do NOT write unit tests, mocks, or test suites unless explicitly requested or when guarding a mission-critical project invariant locked in `<repo>/INVARIANTS.md` (via the `list invariants` workflow).
+* **Real terminal verification over unit tests:** Verify code by running the actual command, script, CLI tool, or inspect the real output state. Discard scratch scripts before committing; if it works end-to-end, it's done.

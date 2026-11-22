@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Universal Ephemeral Worktree Creator & Semantic Model Tier Dispatcher (`bin/spawn-agent`)
 # Usage:
-#   spawn-agent --tier light|heavy --role architect|project-chief --repo <path> --task <slug> --brief "<markdown>" [--verify-cmd "<cmd>"] [--cmd "<shell_cmd>"] [--auto-merge]
+#   spawn-agent --tier light|heavy --role architect|project-chief|research-chief|reaper --repo <path> --task <slug> --brief "<markdown>" [--verify-cmd "<cmd>"] [--cmd "<shell_cmd>"] [--auto-merge]
 set -euo pipefail
 
 SECONDBRAIN_HOME="${SECONDBRAIN_HOME:-$HOME/.secondbrain}"
@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$TASK_SLUG" ]]; then
-  echo "Usage: spawn-agent --task <slug> [--repo <path>] [--tier light|heavy] [--role architect|project-chief|research-chief] [--brief '...'] [--cmd '...'] [--auto-merge]" >&2
+  echo "Usage: spawn-agent --task <slug> [--repo <path>] [--tier light|heavy] [--role architect|project-chief|research-chief|reaper] [--brief '...'] [--cmd '...'] [--auto-merge]" >&2
   exit 1
 fi
 
@@ -47,7 +47,7 @@ if [[ "$ROLE" == "research-chief" && -z "$REPO_PATH" ]]; then
 fi
 
 if [[ -z "$REPO_PATH" ]]; then
-  echo "Usage: spawn-agent --repo <path> --task <slug> [--tier light|heavy] [--role architect|project-chief|research-chief] [--brief '...']" >&2
+  echo "Usage: spawn-agent --repo <path> --task <slug> [--tier light|heavy] [--role architect|project-chief|research-chief|reaper] [--brief '...']" >&2
   exit 1
 fi
 
@@ -222,6 +222,30 @@ Your mission is to serve as an intellectual sparring partner for the Captain dur
 ---
 $(cat "$BRIEF_FILE")
 PROMPT_EOF
+  elif [[ "$ROLE" == "reaper" ]]; then
+    PARENT_NOTIF_MODE="auto"
+    AUTO_MERGE_INSTR="Leave the verified branch \`$BRANCH_NAME\` ready in \`$WORKTREE_DIR\` and report status \`ready_to_merge\`."
+    if [[ "$AUTO_MERGE" == "true" ]]; then
+      AUTO_MERGE_INSTR="Since \`--auto-merge\` is enabled, after \`${VERIFY_CMD:-true}\` passes and you commit & rebase onto \`$BASE_BRANCH\`, unlink symlinked \`node_modules\`/\`.venv\`/\`.env\`, \`cd \"$REPO_PATH\"\`, run \`git merge --ff-only \"$BRANCH_NAME\"\`, remove the worktree (\`git worktree remove --force \"$WORKTREE_DIR\" && git branch -d \"$BRANCH_NAME\"\`), report status \`merged\`, and finally run \`bb thread archive --self\` so this finished worker thread does not bloat the sidebar."
+    fi
+    cat > "$PROMPT_FILE" <<PROMPT_EOF
+Use the bb skill "reaper".
+
+You are the **Autonomous Code Reaper** operating inside the isolated ephemeral git worktree \`$WORKTREE_DIR\` on branch \`$BRANCH_NAME\` (base branch: \`$BASE_BRANCH\` in \`$REPO_PATH\`).
+
+1. Read \`.task-brief.md\` in your worktree, \`$REPO_PATH/AGENTS.md\`, and \`$REPO_PATH/INVARIANTS.md\` (if present). Remove \`.task-brief.md\` before committing.
+2. Audit deterministically, subtract dead code/bloat/obsolete fallbacks, and consolidate genuine 3+ call-site duplication while keeping strictly net-negative LOC (deletions > insertions).
+3. Run the verification command: \`${VERIFY_CMD:-true}\` (must exit 0) plus real end-to-end checks.
+4. Commit with small revertable commits (\`reap: ...\`) and run \`git rebase $BASE_BRANCH\`.
+5. $AUTO_MERGE_INSTR
+6. Signal completion with the exact \`git diff --shortstat $BASE_BRANCH\` output via:
+\`\`\`bash
+$SECONDBRAIN_HOME/bin/secondbrain report --task "$TASK_SLUG" --project "$PROJECT_NAME" --status "ok" --summary "<1-line summary + git diff --shortstat + commit SHA>"
+\`\`\`
+
+---
+$(cat "$BRIEF_FILE")
+PROMPT_EOF
   else
     PARENT_NOTIF_MODE="auto"
     AUTO_MERGE_INSTR="Leave the verified branch \`$BRANCH_NAME\` ready in \`$WORKTREE_DIR\` and report status \`ready_to_merge\`."
@@ -253,6 +277,8 @@ PROMPT_EOF
     THREAD_TITLE="🎯 Chief: $PROJECT_NAME"
   elif [[ "$ROLE" == "research-chief" ]]; then
     THREAD_TITLE="🔬 Research: $TASK_SLUG"
+  elif [[ "$ROLE" == "reaper" ]]; then
+    THREAD_TITLE="🧹 $TASK_SLUG"
   fi
 
   SPAWN_ARGS=(

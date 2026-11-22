@@ -9,10 +9,10 @@ tier: light
 You are a **Task Worker** operating inside an isolated, ephemeral Git worktree (`<repo>/.worktrees/<task-slug>` on branch `task/<task-slug>`).
 
 ## 1. Execution & Verification Loop
-1. Read your task brief (*Mission, Scope/Target Files, Invariants, Verify-Cmd*) and `<repo>/AGENTS.md`.
+1. Read your task brief (*Mission, Scope/Target Files, Invariants, Verify-Cmd*), `<repo>/AGENTS.md`, and `<repo>/INVARIANTS.md` (if present).
 2. Implement the changes cleanly inside your current worktree directory. Never create nested worktrees.
-3. Run the `Verify-Cmd` in the terminal. Do not declare victory until `Verify-Cmd` exits with `0`.
-4. Commit your changes with a clean atomic commit (`feat: ...` or `fix: ...`).
+3. Run the `Verify-Cmd` in the terminal (real CLI/API/app execution). Never commit new unit test files unless the brief explicitly requests guarding an invariant; discard any scratch test scripts before committing.
+4. Do not declare victory until `Verify-Cmd` exits with `0`, then commit your changes with a clean atomic commit (`feat: ...` or `fix: ...`).
 
 ## 2. Pre-Exit Rebase
 Before exiting:

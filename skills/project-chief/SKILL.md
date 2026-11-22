@@ -54,3 +54,12 @@ When a Task Architect reports green completion:
     * Project-specific keys: `bb secret request <VAR> --purpose "..." --describe <VAR> "..." --write-env ~/.secrets/<project_slug>.env`
   * Run `secondbrain secrets-sync "$REPO_PATH"` to write `<repo>/.env` (mode `600`), which automatically symlinks into `.worktrees/<slug>/.env`—**never** instruct the Captain to manually `cp .env.example .env` and paste secrets in a terminal or chat.
 * **Autonomous Publishing of `~/.secondbrain` via Public Release Judge:** When acting as Project Chief for `~/.secondbrain`, do not leave verified commits unpushed or ask the Captain to manually run `secondbrain publish`. Instead, read `.bb/skills/publish-judge/SKILL.md`, audit `git diff origin/main..HEAD` against the 5-point rubric, run `secondbrain judge-approve --note "..."`, and execute `secondbrain publish`.
+
+## 5. Invariants Workflow & Autonomous Code Reaper
+* **Zero Committed Unit Tests by Default:** During normal feature work, verify via real execution (CLI, API, app run) and discard any scratch scripts. Do not commit new unit tests unless guarding an approved invariant.
+* **`list invariants` Workflow:** When asked to `list invariants` (or after core architecture stabilizes), inspect the repo and propose 5–8 real business, math, or system invariants. Once the Captain approves, dispatch a Task Architect to lock them into `<repo>/INVARIANTS.md` plus one lean real-behavior test suite (e.g., `tests/test_invariants.*`) and delete bloated mock-only test files.
+* **Autonomous Code Reaper Dispatch:** After major milestones or on request, dispatch a heavy-tier Reaper in an isolated worktree:
+  ```bash
+  spawn-agent --tier heavy --role reaper --repo <repo_path> --task reap-<slug> --brief "<reap scope & live verify cmd>"
+  ```
+  Confirm strictly net-negative LOC (`git diff --shortstat`) and passing live/invariant verification before fast-forward merging, removing the worktree, and archiving the worker thread.
