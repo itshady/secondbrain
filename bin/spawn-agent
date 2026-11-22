@@ -131,22 +131,77 @@ elif command -v codex >/dev/null 2>&1 && [[ -n "${CODEX_ENV:-}" ]]; then
 fi
 
 read -r RESOLVED_PROVIDER RESOLVED_MODEL RESOLVED_REASONING < <("$PYTHON_BIN" -c '
-import sys, yaml
-cfg_path, tier, harness = sys.argv[1], sys.argv[2], sys.argv[3]
+import json, subprocess, sys, yaml
+cfg_path, tier, harness, role = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 data = yaml.safe_load(open(cfg_path)) or {}
 overrides = (data.get("harness_overrides") or {}).get(harness) or {}
 default_model = "gemini-4-neon" if tier == "heavy" else "gemini-4-hydrogen"
-val = overrides.get(tier) or (data.get("default_tiers") or {}).get(tier, default_model)
-if isinstance(val, dict):
-    provider = val.get("provider", "acp-antigravity")
-    model = val.get("model", default_model)
-    reasoning = val.get("reasoning", "high" if tier == "heavy" else "medium")
-else:
-    provider = "acp-antigravity"
-    model = str(val)
-    reasoning = "high" if tier == "heavy" else "medium"
-print(f"{provider} {model} {reasoning}")
-' "$MODEL_CONFIG" "$TIER" "$DETECTED_HARNESS")
+default_reasoning = "high" if tier == "heavy" else "medium"
+role_group = "chief" if role in ("project-chief", "research-chief") else "worker"
+
+raw_val = (
+    (overrides.get(role_group) or {}).get(tier)
+    or overrides.get(tier)
+    or (data.get("default_tiers") or {}).get(tier, default_model)
+)
+candidates = raw_val if isinstance(raw_val, list) else [raw_val]
+if not candidates:
+    candidates = [default_model]
+
+def normalize(item):
+    if isinstance(item, dict):
+        return (
+            item.get("provider", "acp-antigravity"),
+            item.get("model", default_model),
+            item.get("reasoning", default_reasoning),
+        )
+    return ("acp-antigravity", str(item), default_reasoning)
+
+def is_healthy(quota, provider, model, threshold):
+    if provider == "codex":
+        codex = next((p for p in (quota.get("providers") or []) if p.get("id") == "codex"), None)
+        if not codex or codex.get("status") != "ok":
+            return False
+        return all((w.get("remainingPercent") or 0) >= threshold for w in (codex.get("windows") or []))
+    if provider == "acp-antigravity":
+        agy = quota.get("agy") or {}
+        if agy.get("status") != "ok":
+            return False
+        if model.startswith("gemini-4-argon"):
+            group = "Gemini 4 Argon"
+        elif model.startswith("gemini"):
+            group = "Gemini Models"
+        elif model.startswith(("claude", "gpt")):
+            group = "Claude and GPT models"
+        else:
+            return True
+        rows = [r for r in (agy.get("rows") or []) if r.get("group") == group]
+        return all((r.get("remainingPercent") or 0) >= threshold for r in rows)
+    return True
+
+chosen = normalize(candidates[0])
+if harness == "bb" and len(candidates) > 1:
+    threshold = float(overrides.get("failover_threshold_percent", 5))
+    try:
+        proc = subprocess.run(
+            ["bb", "plugin", "rpc", "call", "unified-usage", "getQuota", "--input-file", "/dev/stdin", "--json"],
+            input="{}",
+            text=True,
+            capture_output=True,
+            timeout=3,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            quota = json.loads(proc.stdout)
+            for cand in candidates:
+                p, m, r = normalize(cand)
+                if is_healthy(quota, p, m, threshold):
+                    chosen = (p, m, r)
+                    break
+    except Exception:
+        pass
+
+print(f"{chosen[0]} {chosen[1]} {chosen[2]}")
+' "$MODEL_CONFIG" "$TIER" "$DETECTED_HARNESS" "$ROLE")
 
 # Write the plain Markdown task brief into the workspace (untracked)
 BRIEF_FILE="$WORKTREE_DIR/.task-brief.md"

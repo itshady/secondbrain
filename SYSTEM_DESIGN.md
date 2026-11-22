@@ -298,6 +298,21 @@ default_tiers:
 
 harness_overrides:
   bb:
+    failover_threshold_percent: 5
+    chief:
+      heavy:
+        - { provider: "acp-antigravity", model: "gemini-4-neon", reasoning: "high" }
+        - { provider: "codex", model: "gpt-6.2-sol", reasoning: "high" }
+        - { provider: "acp-antigravity", model: "claude-opus-5-5", reasoning: "high" }
+    worker:
+      heavy:
+        - { provider: "codex", model: "gpt-6.2-sol", reasoning: "high" }
+        - { provider: "acp-antigravity", model: "gemini-4-neon", reasoning: "high" }
+        - { provider: "acp-antigravity", model: "claude-opus-5-5", reasoning: "high" }
+      light:
+        - { provider: "codex", model: "gpt-6.2-sol", reasoning: "medium" }
+        - { provider: "acp-antigravity", model: "gemini-4-hydrogen", reasoning: "medium" }
+        - { provider: "acp-antigravity", model: "claude-sonnet-5-5", reasoning: "medium" }
     heavy: { provider: "acp-antigravity", model: "gemini-4-neon", reasoning: "high" }
     light: { provider: "acp-antigravity", model: "gemini-4-hydrogen", reasoning: "medium" }
   claude:
@@ -313,7 +328,7 @@ When Chief or Project Chief spawns a worker:
 ```bash
 bin/spawn-agent --tier light --role architect --repo ~/code/my-app --task auth-jwt --brief "..."
 ```
-1. `bin/spawn-agent` reads `config/models.yaml` for the current host harness.
+1. `bin/spawn-agent` reads `config/models.yaml` for the current host harness and role (`chief` vs. `worker`), selecting the first candidate in the failover chain whose live `unified-usage` quota is at or above `failover_threshold_percent`.
 2. Creates the isolated worktree (`~/code/my-app/.worktrees/auth-jwt`) with symlinked/CoW dependencies.
 3. Injects `skills/<role>/SKILL.md` + `invariants/engineering.md`.
 4. Launches the worker non-blockingly (`bb thread spawn` in BB, or background CLI process in headless mode), registers the task in `secondbraind`, and returns immediately.
