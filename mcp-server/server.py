@@ -102,9 +102,55 @@ def ensure_daemon_and_call(method: str, params: dict[str, Any] | None = None) ->
 
 
 def run_mcp_server() -> None:
-    from mcp.server.fastmcp import FastMCP
+    try:
+        from mcp.server.mcpserver import MCPServer
+    except ImportError:
+        from mcp.server.fastmcp import FastMCP as MCPServer
 
-    mcp = FastMCP("secondbrain")
+        run_stdio = None
+    else:
+        import anyio
+        from mcp.server.stdio import stdio_server
+        from mcp.shared.message import SessionMessage
+        from mcp.types import JSONRPCError, JSONRPCRequest, JSONRPCResponse
+
+        async def run_stdio() -> None:
+            # MCP 2.x cancels pending requests at EOF. Give piped clients a
+            # bounded window to receive responses after closing their input.
+            pending = set()
+            input_closed = False
+            drained = anyio.Event()
+            input_send, input_receive = anyio.create_memory_object_stream(0)
+            output_send, output_receive = anyio.create_memory_object_stream(0)
+
+            async def receive_requests() -> None:
+                nonlocal input_closed
+                async with input_send:
+                    async for item in reader:
+                        if isinstance(item, SessionMessage) and isinstance(item.message, JSONRPCRequest):
+                            pending.add(item.message.id)
+                        await input_send.send(item)
+                    input_closed = True
+                    if pending:
+                        with anyio.move_on_after(1):
+                            await drained.wait()
+
+            async def send_responses() -> None:
+                async with output_receive, writer:
+                    async for item in output_receive:
+                        await writer.send(item)
+                        if isinstance(item.message, (JSONRPCResponse, JSONRPCError)):
+                            pending.discard(item.message.id)
+                            if input_closed and not pending:
+                                drained.set()
+
+            async with stdio_server() as (reader, writer), anyio.create_task_group() as tasks:
+                tasks.start_soon(receive_requests)
+                tasks.start_soon(send_responses)
+                server = mcp._lowlevel_server
+                await server.run(input_receive, output_send, server.create_initialization_options())
+
+    mcp = MCPServer("secondbrain")
 
     @mcp.tool()
     def memory_search(
@@ -164,7 +210,10 @@ def run_mcp_server() -> None:
         """Recover all registered projects, active worktrees/workers, and unread completion events in <5ms."""
         return ensure_daemon_and_call("roster_status", {"project": project})
 
-    mcp.run()
+    if run_stdio is None:
+        mcp.run()
+    else:
+        anyio.run(run_stdio)
 
 
 def main() -> None:
