@@ -292,14 +292,14 @@ Agents never hardcode model names in prompts or skills. Every skill requests an 
 # Single Source of Truth for Model Routing Across Harnesses
 
 default_tiers:
-  heavy: "gemini-4-argon"            # Global Chief, Project Chief, Complex Architects
-  light: "gemini-3.8-flash"          # Fast-Fix Workers, Routine Architects, Janitor
+  heavy: "gemini-4-neon"            # Global Chief, Project Chief, Complex Architects
+  light: "gemini-4-hydrogen"        # Fast-Fix Workers, Routine Architects, Janitor
   embedding: "local/bge-small-en-v1.5" # 100% Local ONNX via fastembed (67MB, 0 API keys)
 
 harness_overrides:
   bb:
-    heavy: { provider: "acp-antigravity", model: "gemini-4-argon", reasoning: "high" }
-    light: { provider: "acp-antigravity", model: "gemini-3.8-flash", reasoning: "medium" }
+    heavy: { provider: "acp-antigravity", model: "gemini-4-neon", reasoning: "high" }
+    light: { provider: "acp-antigravity", model: "gemini-4-hydrogen", reasoning: "medium" }
   claude:
     heavy: "claude-opus-4-6"
     light: "claude-sonnet-4-6"

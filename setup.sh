@@ -233,8 +233,8 @@ Run the weekly Second Brain Vault cleanup:
         --cron "0 20 * * 0" \
         --timezone "$local_tz" \
         --provider acp-antigravity \
-        --model gemini-3.8-flash \
-        --reasoning low \
+        --model gemini-4-hydrogen \
+        --reasoning medium \
         --environment "$VAULT_DIR" \
         --prompt "$janitor_prompt" >/dev/null 2>&1 || true
     fi

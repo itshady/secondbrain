@@ -135,7 +135,7 @@ import sys, yaml
 cfg_path, tier, harness = sys.argv[1], sys.argv[2], sys.argv[3]
 data = yaml.safe_load(open(cfg_path)) or {}
 overrides = (data.get("harness_overrides") or {}).get(harness) or {}
-default_model = "gemini-4-argon" if tier == "heavy" else "gemini-3.8-flash"
+default_model = "gemini-4-neon" if tier == "heavy" else "gemini-4-hydrogen"
 val = overrides.get(tier) or (data.get("default_tiers") or {}).get(tier, default_model)
 if isinstance(val, dict):
     provider = val.get("provider", "acp-antigravity")
